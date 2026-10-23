@@ -1,0 +1,34 @@
+appId: com.quizora.app
+productName: Quizora
+directories:
+  buildResources: assets
+  output: release
+files:
+  - electron/**/*
+  - "!node_modules"
+extraResources:
+  - from: backend/dist
+    to: backend-dist
+    filter:
+      - "**/*"
+  - from: frontend/dist
+    to: frontend-dist
+    filter:
+      - "**/*"
+  - from: node_modules/better-sqlite3
+    to: node_modules/better-sqlite3
+    filter:
+      - "**/*"
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: assets/icon.svg
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  deleteAppDataOnUninstall: false
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Quizora
