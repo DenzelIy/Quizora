@@ -98,7 +98,7 @@ export function updateSessionHostSocket(id: string, socketId: string) {
   db.prepare('UPDATE game_sessions SET host_socket_id = ? WHERE id = ?').run(socketId, id);
 }
 
-export function addPlayer(sessionId: string, displayName: string, socketId: string) {
+export function addPlayer(sessionId: string, displayName: string, socketId: string, avatar: string | null = null) {
   const db = getDb();
   const id = randomUUID();
 
@@ -115,8 +115,8 @@ export function addPlayer(sessionId: string, displayName: string, socketId: stri
   }
 
   db.prepare(
-    'INSERT INTO session_players (id, session_id, display_name, socket_id) VALUES (?, ?, ?, ?)'
-  ).run(id, sessionId, finalName, socketId);
+    'INSERT INTO session_players (id, session_id, display_name, socket_id, avatar) VALUES (?, ?, ?, ?, ?)'
+  ).run(id, sessionId, finalName, socketId, avatar);
 
   return { id, displayName: finalName };
 }
@@ -124,6 +124,11 @@ export function addPlayer(sessionId: string, displayName: string, socketId: stri
 export function removePlayer(sessionId: string, playerId: string) {
   const db = getDb();
   db.prepare('DELETE FROM session_players WHERE id = ? AND session_id = ?').run(playerId, sessionId);
+}
+
+export function updatePlayerAvatar(playerId: string, avatar: string) {
+  const db = getDb();
+  db.prepare('UPDATE session_players SET avatar = ? WHERE id = ?').run(avatar, playerId);
 }
 
 export function updatePlayerConnection(playerId: string, socketId: string | null, connected: boolean) {
@@ -138,58 +143,117 @@ export function getPlayerBySocketId(socketId: string) {
   return db.prepare('SELECT * FROM session_players WHERE socket_id = ?').get(socketId) as PlayerRow | undefined;
 }
 
-export function getActiveSessions() {
-  const db = getDb();
-  const sessions = db.prepare(
-    "SELECT gs.*, COUNT(sp.id) as player_count FROM game_sessions gs LEFT JOIN session_players sp ON sp.session_id = gs.id WHERE gs.status != 'FINISHED' GROUP BY gs.id ORDER BY gs.created_at DESC"
-  ).all() as (SessionRow & { player_count: number })[];
-  return sessions.map((s) => ({ ...s, settings: s.settings ? JSON.parse(s.settings) : {} }));
-}
-
 export function finishSession(sessionId: string) {
   updateSessionStatus(sessionId, 'FINISHED');
 }
 
-export function getSessionHistory() {
-  const db = getDb();
-  return db.prepare(`
-    SELECT gs.*, q.title as quiz_title, COUNT(sp.id) as player_count
-    FROM game_sessions gs
-    LEFT JOIN quizzes q ON q.id = gs.quiz_id
-    LEFT JOIN session_players sp ON sp.session_id = gs.id
-    WHERE gs.status = 'FINISHED'
-    GROUP BY gs.id
-    ORDER BY gs.finished_at DESC
-  `).all();
+type SessionSummaryRow = SessionRow & { quiz_title: string | null; player_count: number };
+
+const SESSION_SUMMARY_SQL = `
+  SELECT gs.*, q.title as quiz_title, COUNT(sp.id) as player_count
+  FROM game_sessions gs
+  LEFT JOIN quizzes q ON q.id = gs.quiz_id
+  LEFT JOIN session_players sp ON sp.session_id = gs.id`;
+
+function toSessionSummary(row: SessionSummaryRow) {
+  return {
+    id: row.id,
+    quizId: row.quiz_id,
+    quizTitle: row.quiz_title ?? 'Deleted quiz',
+    pin: row.pin,
+    status: row.status,
+    playerCount: row.player_count,
+    startedAt: row.started_at,
+    finishedAt: row.finished_at,
+    createdAt: row.created_at,
+  };
 }
 
+/** All sessions, newest first, in the shape the game history page expects. */
+export function getSessionSummaries() {
+  const db = getDb();
+  const rows = db.prepare(`${SESSION_SUMMARY_SQL}
+    GROUP BY gs.id
+    ORDER BY COALESCE(gs.finished_at, gs.created_at) DESC
+  `).all() as SessionSummaryRow[];
+  return rows.map(toSessionSummary);
+}
+
+/** Final rankings, per-question answer breakdown and per-player stats for one game. */
 export function getSessionResults(sessionId: string) {
   const db = getDb();
-  const session = getSessionById(sessionId);
-  if (!session) return null;
+  const sessionRow = db.prepare(`${SESSION_SUMMARY_SQL} WHERE gs.id = ? GROUP BY gs.id`).get(sessionId) as
+    | SessionSummaryRow
+    | undefined;
+  if (!sessionRow) return null;
 
-  const players = db.prepare(
-    'SELECT * FROM session_players WHERE session_id = ? ORDER BY score DESC, correct_answers DESC'
-  ).all(sessionId) as PlayerRow[];
+  const playerRows = db.prepare(
+    'SELECT * FROM session_players WHERE session_id = ? ORDER BY score DESC, correct_answers DESC, display_name ASC'
+  ).all(sessionId) as (PlayerRow & { avatar: string | null })[];
 
-  const responses = db.prepare(
-    'SELECT qr.*, q.text as question_text FROM question_responses qr JOIN questions q ON q.id = qr.question_id WHERE qr.session_id = ?'
-  ).all(sessionId);
+  // Players on the same score share a rank.
+  let rank = 0;
+  let lastScore = -1;
+  const players = playerRows.map((p, i) => {
+    if (p.score !== lastScore) {
+      rank = i + 1;
+      lastScore = p.score;
+    }
+    return {
+      id: p.id,
+      displayName: p.display_name,
+      avatar: p.avatar ?? undefined,
+      score: p.score,
+      correctAnswers: p.correct_answers,
+      totalAnswers: p.total_answers,
+      rank,
+    };
+  });
 
-  const questionStats = db.prepare(`
-    SELECT q.id, q.text, q.order_index,
-      COUNT(qr.id) as total_responses,
-      SUM(CASE WHEN qr.is_correct = 1 THEN 1 ELSE 0 END) as correct_count,
-      AVG(qr.response_time_ms) as avg_response_time
-    FROM questions q
+  const questions = db.prepare(`
+    SELECT q.id, q.text FROM questions q
     JOIN game_sessions gs ON gs.quiz_id = q.quiz_id
-    LEFT JOIN question_responses qr ON qr.question_id = q.id AND qr.session_id = ?
     WHERE gs.id = ?
-    GROUP BY q.id
     ORDER BY q.order_index
-  `).all(sessionId, sessionId);
+  `).all(sessionId) as { id: string; text: string }[];
 
-  return { session, players, responses, questionStats };
+  const answerCounts = db.prepare(`
+    SELECT ao.id, ao.text, ao.is_correct, COUNT(qr.id) as count
+    FROM answer_options ao
+    LEFT JOIN question_responses qr ON qr.answer_id = ao.id AND qr.session_id = ?
+    WHERE ao.question_id = ?
+    GROUP BY ao.id
+    ORDER BY ao.order_index
+  `);
+  const responseCounts = db.prepare(`
+    SELECT COUNT(*) as total, COALESCE(SUM(is_correct), 0) as correct
+    FROM question_responses WHERE session_id = ? AND question_id = ?
+  `);
+
+  const questionStats = questions.map((q) => {
+    const counts = responseCounts.get(sessionId, q.id) as { total: number; correct: number };
+    const answers = answerCounts.all(sessionId, q.id) as { id: string; text: string; is_correct: number; count: number }[];
+    return {
+      questionId: q.id,
+      questionText: q.text,
+      correctCount: counts.correct,
+      totalCount: counts.total,
+      answerDistribution: answers.map((a) => ({
+        answerId: a.id,
+        text: a.text,
+        count: a.count,
+        isCorrect: a.is_correct === 1,
+      })),
+    };
+  });
+
+  return { session: toSessionSummary(sessionRow), players, questionStats };
+}
+
+/** Quotes a CSV cell and stops spreadsheet apps from treating names like "=SUM(...)" as formulas. */
+function csvCell(value: string): string {
+  const safe = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+  return `"${safe.replace(/"/g, '""')}"`;
 }
 
 export function exportSessionCSV(sessionId: string): string | null {
@@ -197,11 +261,9 @@ export function exportSessionCSV(sessionId: string): string | null {
   if (!results) return null;
 
   const lines: string[] = ['Rank,Display Name,Score,Correct Answers,Total Answers,Accuracy'];
-  results.players.forEach((p, i) => {
-    const accuracy = p.total_answers > 0
-      ? ((p.correct_answers / p.total_answers) * 100).toFixed(1)
-      : '0.0';
-    lines.push(`${i + 1},"${p.display_name}",${p.score},${p.correct_answers},${p.total_answers},${accuracy}%`);
-  });
+  for (const p of results.players) {
+    const accuracy = p.totalAnswers > 0 ? ((p.correctAnswers / p.totalAnswers) * 100).toFixed(1) : '0.0';
+    lines.push(`${p.rank},${csvCell(p.displayName)},${p.score},${p.correctAnswers},${p.totalAnswers},${accuracy}%`);
+  }
   return lines.join('\n');
 }

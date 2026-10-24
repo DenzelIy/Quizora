@@ -50,6 +50,7 @@ export function GameResults() {
   const leaderboard = results.players.map((p) => ({
     playerId: p.id,
     displayName: p.displayName,
+    avatar: p.avatar,
     score: p.score,
     correctAnswers: p.correctAnswers,
     rank: p.rank,
@@ -97,11 +98,12 @@ export function GameResults() {
                     {stat.questionText}
                   </p>
                   <span className={`text-xs px-2 py-0.5 rounded-full whitespace-nowrap ${
+                    stat.totalCount === 0 ? 'bg-slate-600/30 text-slate-400' :
                     accuracy >= 70 ? 'bg-emerald-500/20 text-emerald-300' :
                     accuracy >= 40 ? 'bg-yellow-500/20 text-yellow-300' :
                     'bg-red-500/20 text-red-300'
                   }`}>
-                    {accuracy}% correct
+                    {stat.totalCount === 0 ? 'No answers' : `${accuracy}% correct`}
                   </span>
                 </div>
                 <div className="space-y-1.5">
@@ -147,7 +149,10 @@ export function GameResults() {
               {results.players.map((p) => (
                 <tr key={p.id} className="border-b border-slate-700/50">
                   <td className="py-2 text-slate-400">#{p.rank}</td>
-                  <td className="py-2 text-white font-medium">{p.displayName}</td>
+                  <td className="py-2 text-white font-medium">
+                    <span className="mr-2">{p.avatar ?? '🙂'}</span>
+                    {p.displayName}
+                  </td>
                   <td className="py-2 text-right text-violet-300">{p.score.toLocaleString()}</td>
                   <td className="py-2 text-right">{p.correctAnswers}/{p.totalAnswers}</td>
                   <td className="py-2 text-right text-slate-400">

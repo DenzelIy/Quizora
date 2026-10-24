@@ -1,11 +1,27 @@
-import { useState, useEffect, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { SkipForward, Trophy, StopCircle, Users, BarChart3 } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
+import { SkipForward, Trophy, StopCircle, Users, BarChart3, Check, X } from 'lucide-react';
 import { Button } from '../components/Button';
 import { Card } from '../components/Card';
 import { Timer } from '../components/Timer';
 import { Leaderboard } from '../components/Leaderboard';
+import { Scoreboard } from '../components/Scoreboard';
+import { shapeIcons, answerSolidColors } from '../components/AnswerCard';
+import { MuteButton } from '../components/MuteButton';
+import {
+  playAnswerIn,
+  playPodium,
+  playQuestionIntro,
+  playQuestionMusic,
+  playReveal,
+  playScoreboard,
+  playTick,
+  stopMusic,
+} from '../services/sound';
+import { StartCountdown } from '../components/StartCountdown';
+import { QuestionIntro } from '../components/QuestionIntro';
 import { socket, connectSocket } from '../services/socket';
+import { useCountdown } from '../hooks/useCountdown';
 
 type SessionState = 'WAITING' | 'STARTING' | 'QUESTION_ACTIVE' | 'ANSWER_REVEAL' | 'LEADERBOARD' | 'FINISHED';
 
@@ -15,10 +31,29 @@ interface QuestionData {
   type: string;
   timeLimit: number;
   points: number;
-  answers: { id: string; text: string; isCorrect?: boolean }[];
+  answers: { id: string; text: string }[];
+}
+
+interface QuestionStartedPayload {
   questionIndex: number;
   totalQuestions: number;
-  explanation?: string | null;
+  introMs: number;
+  introRemainingMs: number;
+  remainingMs: number;
+  question: QuestionData;
+}
+
+interface IntroTiming {
+  until: number;
+  introMs: number;
+  remainingMs: number;
+}
+
+interface AnswerRevealPayload {
+  autoAdvanceMs: number | null;
+  correctAnswerId: string | null;
+  explanation: string | null;
+  stats: { answers: { id: string; text: string; is_correct: number; count: number }[] };
 }
 
 interface AnswerDistribution {
@@ -35,55 +70,158 @@ interface LeaderboardEntry {
   correctAnswers: number;
   rank: number;
   previousRank?: number;
+  previousScore?: number;
+  avatar?: string;
+}
+
+/** Coloured answer tiles with the same shapes players see. Once the answer is known, wrong ones fade out. */
+function AnswerTiles({ answers, correctAnswerId }: { answers: { id: string; text: string }[]; correctAnswerId: string | null }) {
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      {answers.map((ans, i) => {
+        const Shape = shapeIcons[i % shapeIcons.length];
+        const revealed = correctAnswerId !== null;
+        const isCorrect = ans.id === correctAnswerId;
+        return (
+          <div
+            key={ans.id}
+            className={`p-4 sm:p-5 rounded-xl flex items-center gap-3 text-white transition-opacity ${
+              answerSolidColors[i % answerSolidColors.length]
+            } ${revealed && !isCorrect ? 'opacity-30' : ''}`}
+          >
+            <Shape className="w-6 h-6 shrink-0" fill="currentColor" />
+            <span className="text-lg font-semibold flex-1">{ans.text}</span>
+            {revealed && (isCorrect ? <Check className="w-7 h-7 shrink-0" strokeWidth={3} /> : <X className="w-6 h-6 shrink-0" />)}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Top-right countdown until the game moves on by itself. */
+function AutoAdvanceBadge({ seconds }: { seconds: number }) {
+  return (
+    <div className="flex items-center gap-2 text-sm text-slate-400" title="Moving on automatically">
+      <span>Next in</span>
+      <span className="w-11 h-11 rounded-full border-4 border-violet-500 flex items-center justify-center text-lg font-bold text-white tabular-nums">
+        {seconds}
+      </span>
+    </div>
+  );
 }
 
 export function HostGame() {
   const { sessionId } = useParams<{ sessionId: string }>();
   const navigate = useNavigate();
+  const countdownUntil = (useLocation().state as { countdownUntil?: number } | null)?.countdownUntil;
   const [state, setState] = useState<SessionState>('STARTING');
   const [question, setQuestion] = useState<QuestionData | null>(null);
-  const [timeRemaining, setTimeRemaining] = useState(0);
+  const [questionIndex, setQuestionIndex] = useState(0);
+  const [totalQuestions, setTotalQuestions] = useState(0);
+  const [deadline, setDeadline] = useState<number | null>(null);
   const [answerCount, setAnswerCount] = useState(0);
   const [playerCount, setPlayerCount] = useState(0);
+  const [correctAnswerId, setCorrectAnswerId] = useState<string | null>(null);
   const [distribution, setDistribution] = useState<AnswerDistribution[]>([]);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
+  const [isFinalLeaderboard, setIsFinalLeaderboard] = useState(false);
   const [explanation, setExplanation] = useState<string | null>(null);
+  const [intro, setIntro] = useState<IntroTiming | null>(null);
+  const timeRemaining = useCountdown(deadline);
+  const introRemaining = useCountdown(intro?.until ?? null);
+  const [autoAdvanceUntil, setAutoAdvanceUntil] = useState<number | null>(null);
+  const autoAdvanceIn = useCountdown(autoAdvanceUntil);
+  const stateRef = useRef(state);
+  stateRef.current = state;
+
+  // ── Sound ──
+  const answersOpen = state === 'QUESTION_ACTIVE' && !!question && !(intro && introRemaining > 0);
+
+  useEffect(() => {
+    if (answersOpen) playQuestionMusic();
+  }, [answersOpen, questionIndex]);
+
+  useEffect(() => {
+    if (answersOpen && question && question.timeLimit > 0 && timeRemaining > 0 && timeRemaining <= 5) {
+      playTick(timeRemaining <= 3);
+    }
+  }, [timeRemaining, answersOpen, question]);
+
+  useEffect(() => {
+    if (answerCount > 0) playAnswerIn();
+  }, [answerCount]);
+
+  useEffect(() => {
+    if (state === 'ANSWER_REVEAL') playReveal();
+    else if (state === 'LEADERBOARD') playScoreboard();
+    else if (state === 'FINISHED') playPodium();
+  }, [state]);
+
+  useEffect(() => () => stopMusic(), []);
 
   useEffect(() => {
     if (!sessionId) return;
 
-    const connect = async () => {
-      if (!socket.connected) await connectSocket();
+    // Re-register as host on every (re)connect; the server re-sends the active question.
+    const rejoin = () => {
+      socket.emit('host:reconnect', { sessionId }, (response: { success?: boolean; state?: SessionState; players?: { isConnected: boolean }[]; answerCount?: number; totalQuestions?: number }) => {
+        if (!response.success) {
+          // The server forgets finished games, so stay on the final screen in that case.
+          if (stateRef.current !== 'FINISHED') navigate('/host');
+          return;
+        }
+        if (response.state === 'WAITING') {
+          navigate(`/host/lobby/${sessionId}`);
+          return;
+        }
+        setPlayerCount((response.players ?? []).filter((p) => p.isConnected).length);
+        setAnswerCount(response.answerCount ?? 0);
+        if (response.totalQuestions) setTotalQuestions(response.totalQuestions);
+      });
     };
-    connect();
 
-    const onQuestionStarted = (data: { question: QuestionData; timeLimit: number }) => {
+    const onQuestionStarted = (data: QuestionStartedPayload) => {
+      const answersOpenAt = Date.now() + data.introRemainingMs;
+      if (data.introRemainingMs > 0) playQuestionIntro();
       setQuestion(data.question);
-      setTimeRemaining(data.timeLimit);
+      setQuestionIndex(data.questionIndex);
+      setTotalQuestions(data.totalQuestions);
+      setIntro({ until: answersOpenAt, introMs: data.introMs, remainingMs: data.introRemainingMs });
+      setDeadline(data.question.timeLimit > 0 ? answersOpenAt + data.remainingMs : null);
+      setAutoAdvanceUntil(null);
       setState('QUESTION_ACTIVE');
       setAnswerCount(0);
+      setCorrectAnswerId(null);
       setDistribution([]);
       setExplanation(null);
     };
-
-    const onTimerTick = (data: { timeRemaining: number }) => setTimeRemaining(data.timeRemaining);
 
     const onAnswerCount = (data: { count: number; total: number }) => {
       setAnswerCount(data.count);
       setPlayerCount(data.total);
     };
 
-    const onAnswerReveal = (data: { correctAnswers: { id: string; text: string; isCorrect: boolean }[]; distribution: AnswerDistribution[]; explanation?: string | null }) => {
+    const onAnswerReveal = (data: AnswerRevealPayload) => {
       setState('ANSWER_REVEAL');
-      setDistribution(data.distribution);
+      setDeadline(null);
+      setAutoAdvanceUntil(data.autoAdvanceMs != null ? Date.now() + data.autoAdvanceMs : null);
+      setCorrectAnswerId(data.correctAnswerId);
       setExplanation(data.explanation || null);
-      if (question) {
-        setQuestion({ ...question, answers: data.correctAnswers });
-      }
+      setDistribution(
+        (data.stats?.answers ?? []).map((a) => ({
+          answerId: a.id,
+          text: a.text,
+          count: a.count,
+          isCorrect: a.id === data.correctAnswerId,
+        })),
+      );
     };
 
-    const onLeaderboard = (data: { leaderboard: LeaderboardEntry[] }) => {
+    const onLeaderboard = (data: { leaderboard: LeaderboardEntry[]; isFinal?: boolean; autoAdvanceMs: number | null }) => {
       setLeaderboard(data.leaderboard);
+      setAutoAdvanceUntil(data.autoAdvanceMs != null ? Date.now() + data.autoAdvanceMs : null);
+      setIsFinalLeaderboard(!!data.isFinal);
       setState('LEADERBOARD');
     };
 
@@ -96,24 +234,27 @@ export function HostGame() {
       setPlayerCount(data.players.filter((p) => p.isConnected).length);
     };
 
+    socket.on('connect', rejoin);
     socket.on('game:question-started', onQuestionStarted);
-    socket.on('game:timer-tick', onTimerTick);
     socket.on('game:answer-count', onAnswerCount);
     socket.on('game:answer-reveal', onAnswerReveal);
-    socket.on('game:leaderboard', onLeaderboard);
+    socket.on('game:leaderboard-updated', onLeaderboard);
     socket.on('game:finished', onGameFinished);
     socket.on('session:players-updated', onPlayersUpdated);
 
+    if (socket.connected) rejoin();
+    else connectSocket().catch(() => {});
+
     return () => {
+      socket.off('connect', rejoin);
       socket.off('game:question-started', onQuestionStarted);
-      socket.off('game:timer-tick', onTimerTick);
       socket.off('game:answer-count', onAnswerCount);
       socket.off('game:answer-reveal', onAnswerReveal);
-      socket.off('game:leaderboard', onLeaderboard);
+      socket.off('game:leaderboard-updated', onLeaderboard);
       socket.off('game:finished', onGameFinished);
       socket.off('session:players-updated', onPlayersUpdated);
     };
-  }, [sessionId, question]);
+  }, [sessionId, navigate]);
 
   const handleNext = useCallback(() => {
     socket.emit('host:next-question', { sessionId });
@@ -129,9 +270,9 @@ export function HostGame() {
     }
   }, [sessionId]);
 
+  // Votes per answer, keyed by id so bars follow the on-screen answer order even when answers are shuffled.
+  const votesById = new Map(distribution.map((d) => [d.answerId, d.count]));
   const maxCount = Math.max(...distribution.map((d) => d.count), 1);
-
-  const answerBarColors = ['bg-red-500', 'bg-blue-500', 'bg-emerald-500', 'bg-yellow-500', 'bg-purple-500', 'bg-cyan-500'];
 
   if (state === 'FINISHED') {
     return (
@@ -155,12 +296,21 @@ export function HostGame() {
 
   if (state === 'LEADERBOARD') {
     return (
-      <div className="max-w-3xl mx-auto px-4 py-8 space-y-6 fade-in">
-        <h2 className="text-xl font-bold text-white text-center">Leaderboard</h2>
-        <Leaderboard entries={leaderboard} showPodium />
+      <div className="max-w-3xl mx-auto px-4 py-6 space-y-8 fade-in">
+        <div className="flex items-center justify-end gap-3 min-h-11">
+          {autoAdvanceUntil && <AutoAdvanceBadge seconds={autoAdvanceIn} />}
+          <MuteButton />
+        </div>
+        <div className="text-center space-y-1">
+          <h2 className="text-3xl sm:text-4xl font-bold text-white">Scoreboard</h2>
+          <p className="text-sm text-slate-400">
+            Top players after question {questionIndex + 1} of {totalQuestions}
+          </p>
+        </div>
+        <Scoreboard entries={leaderboard} limit={5} />
         <div className="flex justify-center">
           <Button size="lg" icon={<SkipForward className="w-5 h-5" />} onClick={handleNext}>
-            Next Question
+            {isFinalLeaderboard ? 'Finish Game' : 'Next Question'}
           </Button>
         </div>
       </div>
@@ -168,6 +318,7 @@ export function HostGame() {
   }
 
   if (!question) {
+    if (countdownUntil) return <StartCountdown until={countdownUntil} withSound />;
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
         <p className="text-lg text-slate-400">Starting game...</p>
@@ -175,73 +326,76 @@ export function HostGame() {
     );
   }
 
+  if (state === 'QUESTION_ACTIVE' && intro && introRemaining > 0) {
+    return (
+      <QuestionIntro
+        questionIndex={questionIndex}
+        totalQuestions={totalQuestions}
+        text={question.text}
+        introMs={intro.introMs}
+        remainingMs={intro.remainingMs}
+      />
+    );
+  }
+
+  const isLastQuestion = questionIndex >= totalQuestions - 1;
+
   return (
     <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <span className="text-sm font-medium text-slate-400">
-          Question {question.questionIndex + 1} / {question.totalQuestions}
-        </span>
-        <div className="flex items-center gap-3">
+      <div className="flex items-center justify-between gap-3 min-h-22.5">
+        <div className="space-y-1">
+          <span className="block text-sm font-medium text-slate-400">
+            Question {questionIndex + 1} / {totalQuestions}
+          </span>
           <span className="text-sm text-slate-400 flex items-center gap-1">
             <Users className="w-4 h-4" />
             {answerCount}/{playerCount} answered
           </span>
+        </div>
+        <div className="flex items-center gap-3">
+          {question.timeLimit > 0 && state === 'QUESTION_ACTIVE' && (
+            <Timer timeRemaining={timeRemaining} totalTime={question.timeLimit} size="md" />
+          )}
+          {state === 'ANSWER_REVEAL' && autoAdvanceUntil && <AutoAdvanceBadge seconds={autoAdvanceIn} />}
+          <MuteButton />
           <Button size="sm" variant="danger" icon={<StopCircle className="w-3.5 h-3.5" />} onClick={handleEndGame}>
             End
           </Button>
         </div>
       </div>
 
-      <div className="flex items-start gap-6">
-        <div className="flex-1">
-          <Card padding="lg">
-            <h2 className="text-2xl sm:text-3xl font-bold text-white leading-tight">
-              {question.text}
-            </h2>
-            <p className="text-sm text-slate-400 mt-2">{question.points} points</p>
-          </Card>
-        </div>
-        <Timer timeRemaining={timeRemaining} totalTime={question.timeLimit} size={state === 'QUESTION_ACTIVE' ? 'lg' : 'md'} />
-      </div>
+      <Card padding="lg">
+        <h2 className="text-2xl sm:text-3xl font-bold text-white leading-tight">
+          {question.text}
+        </h2>
+        <p className="text-sm text-slate-400 mt-2">{question.points} points</p>
+      </Card>
 
       {state === 'ANSWER_REVEAL' && (
-        <div className="space-y-4 fade-in">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {question.answers.map((ans, i) => (
-              <div
-                key={ans.id}
-                className={`p-4 rounded-xl border-2 flex items-center gap-3 ${
-                  ans.isCorrect
-                    ? 'border-emerald-500 bg-emerald-500/10'
-                    : 'border-slate-600 bg-slate-800/30 opacity-60'
-                }`}
-              >
-                <span className="text-base font-medium">{ans.text}</span>
-                {ans.isCorrect && <span className="text-emerald-400 text-sm font-semibold ml-auto">Correct</span>}
-              </div>
-            ))}
+        <div className="space-y-6 fade-in">
+          {/* Votes per answer, Kahoot-style: one column per answer in its colour, the correct one ticked. */}
+          <div className="flex items-end justify-center gap-4 sm:gap-8 h-48">
+            {question.answers.map((ans, i) => {
+              const isCorrect = ans.id === correctAnswerId;
+              const votes = votesById.get(ans.id) ?? 0;
+              const Shape = shapeIcons[i % shapeIcons.length];
+              return (
+                <div key={ans.id} className={`flex flex-col items-center justify-end h-full w-16 sm:w-24 ${isCorrect ? '' : 'opacity-40'}`}>
+                  <span className="text-2xl font-bold text-white mb-1">{votes}</span>
+                  <div
+                    className={`w-full rounded-t-lg ${answerSolidColors[i % answerSolidColors.length]} transition-all duration-700`}
+                    style={{ height: `${Math.max((votes / maxCount) * 100, 4)}%` }}
+                  />
+                  <div className={`w-full flex items-center justify-center gap-1 py-1.5 rounded-b-lg ${answerSolidColors[i % answerSolidColors.length]}`}>
+                    <Shape className="w-4 h-4 text-white" fill="currentColor" />
+                    {isCorrect && <Check className="w-5 h-5 text-white" strokeWidth={3} />}
+                  </div>
+                </div>
+              );
+            })}
           </div>
 
-          {distribution.length > 0 && (
-            <Card>
-              <h3 className="text-sm font-medium text-slate-400 mb-3">Answer Distribution</h3>
-              <div className="space-y-2">
-                {distribution.map((d, i) => (
-                  <div key={d.answerId} className="flex items-center gap-3">
-                    <span className="text-sm text-slate-300 w-32 truncate">{d.text}</span>
-                    <div className="flex-1 h-8 bg-slate-700/30 rounded-lg overflow-hidden">
-                      <div
-                        className={`h-full ${d.isCorrect ? 'bg-emerald-500' : answerBarColors[i]} rounded-lg transition-all duration-500 flex items-center px-2`}
-                        style={{ width: `${Math.max((d.count / maxCount) * 100, 8)}%` }}
-                      >
-                        <span className="text-xs font-bold text-white">{d.count}</span>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </Card>
-          )}
+          <AnswerTiles answers={question.answers} correctAnswerId={correctAnswerId} />
 
           {explanation && (
             <Card className="bg-violet-500/5 border-violet-500/20">
@@ -254,24 +408,13 @@ export function HostGame() {
               Leaderboard
             </Button>
             <Button size="lg" icon={<SkipForward className="w-5 h-5" />} onClick={handleNext}>
-              Next Question
+              {isLastQuestion ? 'Finish' : 'Next Question'}
             </Button>
           </div>
         </div>
       )}
 
-      {state === 'QUESTION_ACTIVE' && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {question.answers.map((ans, i) => {
-            const bgColors = ['bg-red-500/15 border-red-500/30', 'bg-blue-500/15 border-blue-500/30', 'bg-emerald-500/15 border-emerald-500/30', 'bg-yellow-500/15 border-yellow-500/30', 'bg-purple-500/15 border-purple-500/30', 'bg-cyan-500/15 border-cyan-500/30'];
-            return (
-              <div key={ans.id} className={`p-4 rounded-xl border-2 ${bgColors[i]} flex items-center gap-3`}>
-                <span className="text-base font-medium text-white">{ans.text}</span>
-              </div>
-            );
-          })}
-        </div>
-      )}
+      {state === 'QUESTION_ACTIVE' && <AnswerTiles answers={question.answers} correctAnswerId={null} />}
     </div>
   );
 }

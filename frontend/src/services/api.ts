@@ -62,6 +62,7 @@ export interface SessionSummary {
 export interface PlayerResult {
   id: string;
   displayName: string;
+  avatar?: string;
   score: number;
   correctAnswers: number;
   totalAnswers: number;

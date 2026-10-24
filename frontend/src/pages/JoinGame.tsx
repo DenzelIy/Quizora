@@ -3,12 +3,14 @@ import { useNavigate } from 'react-router-dom';
 import { Zap, LogIn } from 'lucide-react';
 import { Button } from '../components/Button';
 import { socket, connectSocket } from '../services/socket';
+import { AVATARS, randomAvatar } from '../components/avatars';
 
 export function JoinGame() {
   const [pin, setPin] = useState('');
   const [name, setName] = useState('');
   const [error, setError] = useState('');
   const [joining, setJoining] = useState(false);
+  const [avatar, setAvatar] = useState(randomAvatar);
   const pinRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
 
@@ -44,12 +46,12 @@ export function JoinGame() {
       await connectSocket();
       socket.emit(
         'player:join-session',
-        { pin, displayName: trimmedName },
-        (response: { success: boolean; sessionId?: string; playerId?: string; error?: string }) => {
+        { pin, displayName: trimmedName, avatar },
+        (response: { success?: boolean; sessionId?: string; playerId?: string; displayName?: string; error?: string }) => {
           setJoining(false);
           if (response.success && response.sessionId) {
             navigate(`/play/${response.sessionId}`, {
-              state: { playerId: response.playerId, playerName: trimmedName },
+              state: { playerId: response.playerId, playerName: response.displayName ?? trimmedName, avatar },
             });
           } else {
             setError(response.error || 'Could not join game');
@@ -102,6 +104,28 @@ export function JoinGame() {
               className="w-full text-center text-lg py-3 bg-[#1e293b] border-2 border-slate-600 rounded-xl text-white placeholder-slate-500 outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-500/30 transition-colors"
               onKeyDown={(e) => e.key === 'Enter' && handleJoin()}
             />
+          </div>
+
+          <div>
+            <p className="text-xs text-slate-400 text-center mb-2">Pick your character</p>
+            <div className="grid grid-cols-8 gap-1.5">
+              {AVATARS.map((a) => (
+                <button
+                  key={a}
+                  type="button"
+                  onClick={() => setAvatar(a)}
+                  className={`aspect-square rounded-lg text-2xl flex items-center justify-center transition-all ${
+                    a === avatar
+                      ? 'bg-violet-500 ring-2 ring-violet-300 scale-110'
+                      : 'bg-[#1e293b] hover:bg-slate-700'
+                  }`}
+                  aria-label={`Character ${a}`}
+                  aria-pressed={a === avatar}
+                >
+                  {a}
+                </button>
+              ))}
+            </div>
           </div>
 
           {error && (

@@ -4,6 +4,7 @@ interface Player {
   id: string;
   displayName: string;
   isConnected: boolean;
+  avatar?: string;
 }
 
 interface PlayerListProps {
@@ -38,8 +39,11 @@ export function PlayerList({ players, onRemove, showRemove = false }: PlayerList
                 : 'bg-slate-700/30 text-slate-400 border border-slate-600/30'
             }`}
           >
-            <span className={`w-2 h-2 rounded-full flex-shrink-0 ${player.isConnected ? 'bg-emerald-400' : 'bg-slate-500'}`} />
+            <span className={`text-xl leading-none shrink-0 ${player.isConnected ? '' : 'grayscale opacity-50'}`}>
+              {player.avatar ?? '🙂'}
+            </span>
             <span className="truncate flex-1">{player.displayName}</span>
+            <span className={`w-2 h-2 rounded-full shrink-0 ${player.isConnected ? 'bg-emerald-400' : 'bg-slate-500'}`} />
             {showRemove && onRemove && (
               <button
                 onClick={() => onRemove(player.id)}

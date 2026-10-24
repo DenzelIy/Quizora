@@ -210,5 +210,11 @@ export function initializeDatabase(dbPath: string): Database.Database {
       ON question_responses(session_id, player_id, question_id);
   `);
 
+  // Columns added after the first release; ALTER TABLE has no IF NOT EXISTS for columns.
+  const playerColumns = db.prepare('PRAGMA table_info(session_players)').all() as { name: string }[];
+  if (!playerColumns.some((c) => c.name === 'avatar')) {
+    db.exec('ALTER TABLE session_players ADD COLUMN avatar TEXT');
+  }
+
   return db;
 }

@@ -10,7 +10,8 @@
     "frontend"
   ],
   "scripts": {
-    "dev": "concurrently -n shared,backend,frontend -c blue,green,magenta \"npm run dev -w shared\" \"npm run dev -w backend\" \"npm run dev -w frontend\"",
+    "dev": "concurrently -n shared,backend,frontend -c blue,green,magenta \"npm run dev -w shared\" \"cross-env FRONTEND_PORT=5173 npm run dev -w backend\" \"npm run dev -w frontend\"",
+    "dev:rebuild": "node \"%npm_config_node_gyp%\" rebuild --directory node_modules/better-sqlite3 || node \"%APPDATA%/npm/node_modules/npm/node_modules/node-gyp/bin/node-gyp.js\" rebuild --directory node_modules/better-sqlite3",
     "build": "npm run build -w shared && npm run build -w backend && npm run build -w frontend",
     "start": "npm run start -w backend",
     "db:seed": "npm run db:seed -w backend",
@@ -20,9 +21,10 @@
     "dist:win": "electron-builder --win"
   },
   "devDependencies": {
+    "@electron/rebuild": "^3.7.1",
     "concurrently": "^8.2.2",
+    "cross-env": "^10.1.0",
     "electron": "^33.2.0",
-    "electron-builder": "^25.1.8",
-    "@electron/rebuild": "^3.7.1"
+    "electron-builder": "^25.1.8"
   }
 }
