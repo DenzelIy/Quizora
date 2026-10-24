@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   ArrowLeft, BookOpen, Beaker, Target, CheckCircle2, HelpCircle,
   Clock, Import, ChevronDown, ChevronRight, FileText, MessageSquare,
-  Star, AlertCircle, Loader2,
+  Star, AlertCircle, Loader2, Play,
 } from 'lucide-react';
 import { api, type PackFull, type QuizSummary } from '../services/api';
 import { Card } from '../components/Card';
@@ -160,6 +160,15 @@ export function PackDetail() {
                 <span key={tag} className="text-xs px-2 py-0.5 rounded-full bg-slate-700/50 text-slate-300">{tag}</span>
               ))}
             </div>
+            {pack.scenes.length > 0 && (
+              <div className="mt-4">
+                <Link to={`/griot/${pack.slug}`}>
+                  <Button variant="primary" size="lg" icon={<Play className="w-5 h-5" />}>
+                    Play Griot Mode
+                  </Button>
+                </Link>
+              </div>
+            )}
           </div>
         </div>
       </div>

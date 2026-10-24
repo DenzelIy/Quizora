@@ -9,6 +9,7 @@ import { GameResults } from './pages/GameResults';
 import { GameHistory } from './pages/GameHistory';
 import { PackBrowser } from './pages/PackBrowser';
 import { PackDetail } from './pages/PackDetail';
+import { GriotPlayer } from './pages/GriotPlayer';
 import { JoinGame } from './pages/JoinGame';
 import { PlayerGame } from './pages/PlayerGame';
 import { Welcome } from './pages/Welcome';
@@ -28,6 +29,7 @@ export function App() {
         <Route path="/packs" element={<PackBrowser />} />
         <Route path="/packs/:slug" element={<PackDetail />} />
       </Route>
+      <Route path="/griot/:slug" element={<GriotPlayer />} />
       <Route path="/welcome" element={<Welcome />} />
       <Route path="/join" element={<JoinGame />} />
       <Route path="/play/:sessionId" element={<PlayerGame />} />
