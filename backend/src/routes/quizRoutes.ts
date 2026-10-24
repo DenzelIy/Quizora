@@ -129,8 +129,8 @@ router.get(
   '/network-info',
   asyncHandler(async (_req, res) => {
     const port = parseInt(process.env.PORT ?? '3001', 10);
-    const addresses = getLanAddresses();
-    res.json({ port, addresses });
+    const interfaces = getLanAddresses();
+    res.json({ port, interfaces });
   }),
 );
 

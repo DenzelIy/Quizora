@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import cors from 'cors';
 import { initDb } from './db/index.js';
+import { seedDatabase } from './db/seed.js';
 import { seedContentPacks } from './db/seedPacks.js';
 import quizRoutes from './routes/quizRoutes.js';
 import packRoutes from './routes/packRoutes.js';
@@ -17,6 +18,7 @@ const PORT = parseInt(process.env.PORT ?? '3001', 10);
 const DB_PATH = process.env.DB_PATH ?? path.join(__dirname, '..', 'data', 'quizspark.db');
 
 initDb(DB_PATH);
+seedDatabase();
 seedContentPacks();
 
 const app = express();
