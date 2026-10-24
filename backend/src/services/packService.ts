@@ -328,7 +328,7 @@ const importQuestionSchema = z.object({
   text: z.string().min(1).max(5000),
   imageUrl: z.string().max(2000).nullable().optional().default(null),
   timeLimit: z.number().int().min(5).max(300).default(30),
-  points: z.number().int().min(0).max(1000).default(10),
+  points: z.number().int().min(0).max(10000).default(10),
   explanation: z.string().max(2000).nullable().optional().default(null),
   topic: z.string().max(200).nullable().optional().default(null),
   difficulty: z.enum(['easy', 'medium', 'hard']).nullable().optional().default(null),
