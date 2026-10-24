@@ -7,6 +7,8 @@ import { HostLobby } from './pages/HostLobby';
 import { HostGame } from './pages/HostGame';
 import { GameResults } from './pages/GameResults';
 import { GameHistory } from './pages/GameHistory';
+import { PackBrowser } from './pages/PackBrowser';
+import { PackDetail } from './pages/PackDetail';
 import { JoinGame } from './pages/JoinGame';
 import { PlayerGame } from './pages/PlayerGame';
 import { Welcome } from './pages/Welcome';
@@ -23,6 +25,8 @@ export function App() {
         <Route path="/host/game/:sessionId" element={<HostGame />} />
         <Route path="/host/results/:sessionId" element={<GameResults />} />
         <Route path="/host/history" element={<GameHistory />} />
+        <Route path="/packs" element={<PackBrowser />} />
+        <Route path="/packs/:slug" element={<PackDetail />} />
       </Route>
       <Route path="/welcome" element={<Welcome />} />
       <Route path="/join" element={<JoinGame />} />

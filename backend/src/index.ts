@@ -4,7 +4,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import cors from 'cors';
 import { initDb } from './db/index.js';
+import { seedContentPacks } from './db/seedPacks.js';
 import quizRoutes from './routes/quizRoutes.js';
+import packRoutes from './routes/packRoutes.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { setupSocketIO } from './socket/index.js';
 import { getLanAddresses } from './utils/network.js';
@@ -15,6 +17,7 @@ const PORT = parseInt(process.env.PORT ?? '3001', 10);
 const DB_PATH = process.env.DB_PATH ?? path.join(__dirname, '..', 'data', 'quizspark.db');
 
 initDb(DB_PATH);
+seedContentPacks();
 
 const app = express();
 const server = createServer(app);
@@ -27,6 +30,7 @@ app.get('/api/health', (_req, res) => {
 });
 
 app.use('/api', quizRoutes);
+app.use('/api', packRoutes);
 
 const frontendDist = process.env.FRONTEND_DIST ?? path.join(__dirname, '..', '..', 'frontend', 'dist');
 try {

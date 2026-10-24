@@ -87,6 +87,80 @@ export interface NetworkInfo {
   port: number;
 }
 
+export interface PackSummary {
+  id: string;
+  slug: string;
+  title: string;
+  description: string;
+  category: 'culture' | 'stem';
+  subject?: string;
+  tags: string[];
+  difficulty: string;
+  packType: string;
+  totalQuestions: number;
+  timesUsed: number;
+  coverImage?: string;
+  gradeLevel?: string;
+  curriculum?: string;
+  author?: string;
+  estimatedDurationMin?: number;
+}
+
+export interface PackChapter {
+  id: string;
+  packId: string;
+  title: string;
+  description?: string;
+  contentText?: string;
+  imageUrl?: string;
+  orderIndex: number;
+  chapterType: string;
+}
+
+export interface PackQuestion {
+  id: string;
+  packId: string;
+  chapterId?: string;
+  type: 'multiple-choice' | 'true-false';
+  text: string;
+  imageUrl?: string;
+  timeLimit: number;
+  points: number;
+  explanation?: string;
+  topic?: string;
+  difficulty?: string;
+  orderIndex: number;
+  mathNotation: boolean;
+  answers: { id: string; questionId: string; text: string; isCorrect: boolean; orderIndex: number }[];
+}
+
+export interface PackScene {
+  id: string;
+  packId: string;
+  title: string;
+  narratorText: string;
+  backgroundImage?: string;
+  narratorMood: string;
+  audioFile?: string;
+  durationSeconds?: number;
+  orderIndex: number;
+  questionId?: string;
+}
+
+export interface PackFull extends PackSummary {
+  objectives: { id: string; packId: string; text: string; orderIndex: number }[];
+  chapters: PackChapter[];
+  questions: PackQuestion[];
+  scenes: PackScene[];
+  license: string;
+  version: number;
+  status: string;
+  source?: string;
+  sourceUrl?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export const api = {
   getQuizzes: () => request<QuizSummary[]>('/quizzes'),
 
@@ -144,4 +218,20 @@ export const api = {
   },
 
   getNetworkInfo: () => request<NetworkInfo>('/network-info'),
+
+  getPacks: (category?: string, search?: string) => {
+    const params = new URLSearchParams();
+    if (category) params.set('category', category);
+    if (search) params.set('search', search);
+    const qs = params.toString();
+    return request<PackSummary[]>(`/packs${qs ? `?${qs}` : ''}`);
+  },
+
+  getPack: (slug: string) => request<PackFull>(`/packs/${slug}`),
+
+  importPackQuestions: (packId: string, questionIds: string[], quizId: string) =>
+    request<{ imported: number }>(`/packs/${packId}/import`, {
+      method: 'POST',
+      body: JSON.stringify({ questionIds, quizId }),
+    }),
 };

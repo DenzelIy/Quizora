@@ -1,5 +1,5 @@
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { Zap, Monitor, LogIn } from 'lucide-react';
+import { Zap, Monitor, LogIn, Library } from 'lucide-react';
 
 export function Layout() {
   const location = useLocation();
@@ -15,7 +15,7 @@ export function Layout() {
             <div className="w-8 h-8 rounded-lg bg-violet-500 flex items-center justify-center">
               <Zap className="w-5 h-5 text-white" />
             </div>
-            <span className="text-white">Quiz<span className="text-violet-400">Spark</span></span>
+            <span className="text-white">Quiz<span className="text-violet-400">ora</span></span>
           </Link>
 
           <nav className="flex items-center gap-1">
@@ -29,6 +29,17 @@ export function Layout() {
             >
               <Monitor className="w-4 h-4" />
               <span className="hidden sm:inline">Host</span>
+            </Link>
+            <Link
+              to="/packs"
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                isActive('/packs')
+                  ? 'bg-amber-500/20 text-amber-300'
+                  : 'text-slate-300 hover:text-white hover:bg-slate-700/50'
+              }`}
+            >
+              <Library className="w-4 h-4" />
+              <span className="hidden sm:inline">Packs</span>
             </Link>
             <Link
               to="/join"

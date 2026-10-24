@@ -11,7 +11,7 @@ export function Home() {
             <Zap className="w-10 h-10 text-white" />
           </div>
           <h1 className="text-4xl sm:text-5xl font-bold text-white">
-            Quiz<span className="text-violet-400">Spark</span>
+            Quiz<span className="text-violet-400">ora</span>
           </h1>
           <p className="text-lg text-slate-300">
             Offline Multiplayer Quiz Game
