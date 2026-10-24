@@ -234,4 +234,44 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ questionIds, quizId }),
     }),
+
+  exportPack: async (id: string): Promise<Blob> => {
+    const res = await fetch(`${BASE}/packs/${id}/export`);
+    if (!res.ok) throw new Error('Export failed');
+    return res.blob();
+  },
+
+  importPackFromFile: (data: unknown) =>
+    request<PackFull>('/packs/import', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  createPack: (data: unknown) =>
+    request<PackFull>('/packs/create', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  updatePack: (id: string, data: unknown) =>
+    request<PackFull>(`/packs/${id}/update`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  recordCompletion: (data: {
+    packId: string; playerName: string; mode: string;
+    score: number; totalPoints: number;
+    correctAnswers: number; totalQuestions: number;
+    timeTakenSeconds?: number; details?: string;
+  }) => request<{ id: string }>('/analytics/completions', { method: 'POST', body: JSON.stringify(data) }),
+
+  getPlayerStats: (name: string) => request<{
+    totalCompleted: number; averageScore: number;
+    topicBreakdown: { topic: string; correct: number; total: number; percentage: number }[];
+  }>(`/analytics/player/${encodeURIComponent(name)}`),
+
+  getPackLeaderboard: (packId: string) => request<{
+    entries: { playerName: string; score: number; totalPoints: number; completedAt: string }[];
+  }>(`/analytics/leaderboard/${packId}`),
 };

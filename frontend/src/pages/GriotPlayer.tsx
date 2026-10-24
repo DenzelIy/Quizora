@@ -8,6 +8,8 @@ import { api, type PackFull, type PackScene, type PackQuestion } from '../servic
 import { Narrator, type NarratorMood } from '../components/Narrator';
 import { Button } from '../components/Button';
 import { Card } from '../components/Card';
+import { MathText } from '../components/MathText';
+import { useSettings } from '../contexts/SettingsContext';
 
 type PlayerState = 'narrating' | 'question' | 'result' | 'complete';
 
@@ -20,6 +22,7 @@ interface QuestionResult {
 export function GriotPlayer() {
   const { slug } = useParams<{ slug: string }>();
   const navigate = useNavigate();
+  const { settings } = useSettings();
   const [pack, setPack] = useState<PackFull | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -36,6 +39,7 @@ export function GriotPlayer() {
 
   const typingRef = useRef<number | null>(null);
   const ttsRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const startTimeRef = useRef<number>(Date.now());
 
   useEffect(() => {
     if (!slug) return;
@@ -57,6 +61,11 @@ export function GriotPlayer() {
     : null;
 
   const typeText = useCallback((text: string) => {
+    if (settings.reduceMotion) {
+      setDisplayedText(text);
+      setIsTyping(false);
+      return;
+    }
     setDisplayedText('');
     setIsTyping(true);
     let i = 0;
@@ -72,7 +81,7 @@ export function GriotPlayer() {
       }
     };
     tick();
-  }, []);
+  }, [settings.reduceMotion]);
 
   const stopTyping = useCallback(() => {
     if (typingRef.current) {
@@ -169,6 +178,25 @@ export function GriotPlayer() {
       stopSpeaking();
     }
   };
+
+  useEffect(() => {
+    if (playerState !== 'complete' || !pack) return;
+    const correctCount = results.filter(r => r.correct).length;
+    const totalQ = results.length;
+    const totalPoints = totalQ * 10;
+    const score = correctCount * 10;
+    const timeTaken = Math.round((Date.now() - startTimeRef.current) / 1000);
+    api.recordCompletion({
+      packId: pack.id,
+      playerName: 'Student',
+      mode: 'griot',
+      score,
+      totalPoints,
+      correctAnswers: correctCount,
+      totalQuestions: totalQ,
+      timeTakenSeconds: timeTaken,
+    }).catch(() => {});
+  }, [playerState, pack, results]);
 
   if (loading) {
     return (
@@ -307,7 +335,9 @@ export function GriotPlayer() {
         {(playerState === 'question' || playerState === 'result') && linkedQuestion && (
           <div className="w-full space-y-4">
             <Card className="border-amber-500/30">
-              <p className="text-white font-medium text-center">{linkedQuestion.text}</p>
+              <p className="text-white font-medium text-center">
+                {linkedQuestion.mathNotation ? <MathText text={linkedQuestion.text} /> : linkedQuestion.text}
+              </p>
             </Card>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -346,7 +376,9 @@ export function GriotPlayer() {
                       <span className="w-8 h-8 rounded-lg bg-slate-700/50 flex items-center justify-center text-sm font-bold text-slate-300 flex-shrink-0">
                         {String.fromCharCode(65 + i)}
                       </span>
-                      <span className="text-sm text-slate-200 flex-1">{answer.text}</span>
+                      <span className="text-sm text-slate-200 flex-1">
+                        {linkedQuestion.mathNotation ? <MathText text={answer.text} /> : answer.text}
+                      </span>
                       {isRevealed && answer.isCorrect && <CheckCircle2 className="w-5 h-5 text-emerald-400 flex-shrink-0" />}
                       {isRevealed && isSelected && !answer.isCorrect && <XCircle className="w-5 h-5 text-red-400 flex-shrink-0" />}
                     </div>
@@ -357,7 +389,9 @@ export function GriotPlayer() {
 
             {showExplanation && linkedQuestion.explanation && (
               <Card className="border-slate-600/50 bg-slate-800/50">
-                <p className="text-sm text-slate-300 italic">{linkedQuestion.explanation}</p>
+                <p className="text-sm text-slate-300 italic">
+                  {linkedQuestion.mathNotation ? <MathText text={linkedQuestion.explanation} /> : linkedQuestion.explanation}
+                </p>
               </Card>
             )}
 

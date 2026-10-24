@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
-import { BookOpen, Beaker, Search, Filter, Clock, HelpCircle, Star, ChevronRight } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Link, useSearchParams, useNavigate } from 'react-router-dom';
+import { BookOpen, Beaker, Search, Filter, Clock, HelpCircle, Star, ChevronRight, Upload, CheckCircle2, AlertCircle, Loader2, PenTool } from 'lucide-react';
 import { api, type PackSummary } from '../services/api';
 import { Card } from '../components/Card';
 import { Input } from '../components/Input';
@@ -34,12 +34,18 @@ const DIFFICULTY_COLORS: Record<string, string> = {
 
 export function PackBrowser() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const category = searchParams.get('category') as 'culture' | 'stem' | null;
   const [packs, setPacks] = useState<PackSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [difficultyFilter, setDifficultyFilter] = useState<string>('');
   const [subjectFilter, setSubjectFilter] = useState<string>('');
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importLoading, setImportLoading] = useState(false);
+  const [importError, setImportError] = useState('');
+  const [importSuccess, setImportSuccess] = useState<{ slug: string; title: string } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -57,6 +63,30 @@ export function PackBrowser() {
 
   const subjects = [...new Set(packs.map(p => p.subject).filter(Boolean))] as string[];
 
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImportLoading(true);
+    setImportError('');
+    setImportSuccess(null);
+    try {
+      const text = await file.text();
+      let data: unknown;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        throw new Error('Invalid JSON file');
+      }
+      const pack = await api.importPackFromFile(data);
+      setImportSuccess({ slug: pack.slug, title: pack.title });
+    } catch (err: any) {
+      setImportError(err.message || 'Import failed');
+    } finally {
+      setImportLoading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
   if (!category) {
     return (
       <div className="max-w-5xl mx-auto px-4 py-8 space-y-8">
@@ -65,6 +95,26 @@ export function PackBrowser() {
           <p className="text-slate-400 max-w-md mx-auto">
             Ready-made educational content you can preview, explore, and import into your quizzes
           </p>
+          <div className="pt-2 flex flex-wrap gap-2 justify-center">
+            <Link to="/story/new">
+              <Button
+                variant="ghost"
+                size="sm"
+                icon={<PenTool className="w-4 h-4" />}
+              >
+                Create Story Pack
+              </Button>
+            </Link>
+            <input ref={fileInputRef} type="file" accept=".json" className="hidden" onChange={handleFileSelect} />
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={<Upload className="w-4 h-4" />}
+              onClick={() => setShowImportModal(true)}
+            >
+              Import Pack from JSON
+            </Button>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -90,6 +140,54 @@ export function PackBrowser() {
             );
           })}
         </div>
+
+        {showImportModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4" onClick={() => { setShowImportModal(false); setImportError(''); setImportSuccess(null); }}>
+            <Card className="w-full max-w-md" onClick={e => e.stopPropagation()}>
+              <h2 className="text-lg font-semibold text-white mb-4">Import Content Pack</h2>
+              {importSuccess ? (
+                <div className="text-center py-4">
+                  <CheckCircle2 className="w-12 h-12 text-emerald-400 mx-auto mb-2" />
+                  <p className="text-white font-medium">Imported "{importSuccess.title}"</p>
+                  <p className="text-sm text-slate-400 mt-1">Pack is now available in your library</p>
+                  <div className="flex gap-3 mt-4">
+                    <Button variant="ghost" className="flex-1" onClick={() => { setShowImportModal(false); setImportSuccess(null); window.location.reload(); }}>
+                      Close
+                    </Button>
+                    <Button variant="primary" className="flex-1" onClick={() => navigate(`/packs/${importSuccess.slug}`)}>
+                      View Pack
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <p className="text-sm text-slate-400 mb-4">
+                    Select a JSON file exported from Quizora to import a content pack.
+                  </p>
+                  {importError && (
+                    <div className="flex items-start gap-2 text-sm text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2 mb-4">
+                      <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                      {importError}
+                    </div>
+                  )}
+                  {importLoading ? (
+                    <div className="text-center py-6">
+                      <Loader2 className="w-8 h-8 animate-spin text-violet-400 mx-auto mb-2" />
+                      <p className="text-sm text-slate-400">Importing pack...</p>
+                    </div>
+                  ) : (
+                    <div className="flex gap-3">
+                      <Button variant="ghost" className="flex-1" onClick={() => { setShowImportModal(false); setImportError(''); }}>Cancel</Button>
+                      <Button variant="primary" className="flex-1" icon={<Upload className="w-4 h-4" />} onClick={() => fileInputRef.current?.click()}>
+                        Choose File
+                      </Button>
+                    </div>
+                  )}
+                </>
+              )}
+            </Card>
+          </div>
+        )}
       </div>
     );
   }

@@ -1,5 +1,5 @@
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { Zap, Monitor, LogIn, Library } from 'lucide-react';
+import { Zap, Monitor, LogIn, Library, Settings } from 'lucide-react';
 
 export function Layout() {
   const location = useLocation();
@@ -51,6 +51,17 @@ export function Layout() {
             >
               <LogIn className="w-4 h-4" />
               <span className="hidden sm:inline">Join</span>
+            </Link>
+            <Link
+              to="/settings"
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                isActive('/settings')
+                  ? 'bg-slate-500/20 text-slate-200'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
+              }`}
+            >
+              <Settings className="w-4 h-4" />
+              <span className="hidden sm:inline">Settings</span>
             </Link>
           </nav>
         </div>
