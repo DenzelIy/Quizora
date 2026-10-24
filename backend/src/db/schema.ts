@@ -174,6 +174,24 @@ export function initializeDatabase(dbPath: string): Database.Database {
       question_id TEXT REFERENCES pack_questions(id) ON DELETE SET NULL
     );
 
+    -- Learning analytics: completion tracking
+    CREATE TABLE IF NOT EXISTS pack_completions (
+      id TEXT PRIMARY KEY,
+      pack_id TEXT NOT NULL REFERENCES content_packs(id) ON DELETE CASCADE,
+      player_name TEXT NOT NULL,
+      mode TEXT NOT NULL CHECK (mode IN ('practice','exam','griot')),
+      score INTEGER NOT NULL DEFAULT 0,
+      total_points INTEGER NOT NULL DEFAULT 0,
+      correct_answers INTEGER NOT NULL DEFAULT 0,
+      total_questions INTEGER NOT NULL DEFAULT 0,
+      time_taken_seconds INTEGER,
+      completed_at TEXT DEFAULT (datetime('now')),
+      details TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_pack_completions_pack_id ON pack_completions(pack_id);
+    CREATE INDEX IF NOT EXISTS idx_pack_completions_player ON pack_completions(player_name);
+
     CREATE INDEX IF NOT EXISTS idx_content_packs_category ON content_packs(category);
     CREATE INDEX IF NOT EXISTS idx_content_packs_slug ON content_packs(slug);
     CREATE INDEX IF NOT EXISTS idx_pack_chapters_pack_id ON pack_chapters(pack_id);

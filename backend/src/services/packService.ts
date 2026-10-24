@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { z } from 'zod';
 import { getDb } from '../db/index.js';
 
 interface PackRow {
@@ -237,6 +238,411 @@ export function importPackQuestionsToQuiz(packId: string, questionIds: string[],
 
   doImport();
   return { imported: questionIds.length };
+}
+
+export function exportPack(id: string) {
+  const db = getDb();
+  const row = db.prepare('SELECT * FROM content_packs WHERE id = ?').get(id) as PackRow | undefined;
+  if (!row) return null;
+
+  const full = getFullPack(row);
+
+  const chapterIdToIndex = new Map<string, number>();
+  full.chapters.forEach((c, i) => chapterIdToIndex.set(c.id, i));
+
+  const questionIdToIndex = new Map<string, number>();
+  full.questions.forEach((q, i) => questionIdToIndex.set(q.id, i));
+
+  return {
+    formatVersion: 1,
+    pack: {
+      slug: full.slug,
+      title: full.title,
+      description: full.description,
+      category: full.category,
+      subject: full.subject,
+      tags: full.tags,
+      difficulty: full.difficulty,
+      gradeLevel: full.gradeLevel,
+      curriculum: full.curriculum,
+      author: full.author,
+      source: full.source,
+      sourceUrl: full.sourceUrl,
+      license: full.license,
+      coverImage: full.coverImage,
+      packType: full.packType,
+      estimatedDurationMin: full.estimatedDurationMin,
+      objectives: full.objectives.map(o => ({
+        text: o.text,
+        orderIndex: o.orderIndex,
+      })),
+      chapters: full.chapters.map(c => ({
+        title: c.title,
+        description: c.description,
+        contentText: c.contentText,
+        imageUrl: c.imageUrl,
+        orderIndex: c.orderIndex,
+        chapterType: c.chapterType,
+      })),
+      questions: full.questions.map(q => ({
+        chapterIndex: q.chapterId ? chapterIdToIndex.get(q.chapterId) ?? null : null,
+        type: q.type,
+        text: q.text,
+        imageUrl: q.imageUrl,
+        timeLimit: q.timeLimit,
+        points: q.points,
+        explanation: q.explanation,
+        topic: q.topic,
+        difficulty: q.difficulty,
+        orderIndex: q.orderIndex,
+        mathNotation: q.mathNotation,
+        answers: q.answers.map(a => ({
+          text: a.text,
+          isCorrect: a.isCorrect,
+          orderIndex: a.orderIndex,
+        })),
+      })),
+      scenes: full.scenes.map(s => ({
+        title: s.title,
+        narratorText: s.narratorText,
+        backgroundImage: s.backgroundImage,
+        narratorMood: s.narratorMood,
+        audioFile: s.audioFile,
+        durationSeconds: s.durationSeconds,
+        orderIndex: s.orderIndex,
+        questionIndex: s.questionId ? questionIdToIndex.get(s.questionId) ?? null : null,
+      })),
+    },
+  };
+}
+
+const importAnswerSchema = z.object({
+  text: z.string().min(1).max(1000),
+  isCorrect: z.boolean(),
+  orderIndex: z.number().int().min(0),
+});
+
+const importQuestionSchema = z.object({
+  chapterIndex: z.number().int().min(0).nullable().optional().default(null),
+  type: z.enum(['multiple-choice', 'true-false']),
+  text: z.string().min(1).max(5000),
+  imageUrl: z.string().max(2000).nullable().optional().default(null),
+  timeLimit: z.number().int().min(5).max(300).default(30),
+  points: z.number().int().min(0).max(1000).default(10),
+  explanation: z.string().max(2000).nullable().optional().default(null),
+  topic: z.string().max(200).nullable().optional().default(null),
+  difficulty: z.enum(['easy', 'medium', 'hard']).nullable().optional().default(null),
+  orderIndex: z.number().int().min(0),
+  mathNotation: z.boolean().default(false),
+  answers: z.array(importAnswerSchema).min(1).max(10),
+});
+
+const importSceneSchema = z.object({
+  title: z.string().min(1).max(500),
+  narratorText: z.string().min(1).max(5000),
+  backgroundImage: z.string().max(2000).nullable().optional().default(null),
+  narratorMood: z.enum(['neutral', 'happy', 'thinking', 'excited', 'serious']).default('neutral'),
+  audioFile: z.string().max(2000).nullable().optional().default(null),
+  durationSeconds: z.number().int().min(0).nullable().optional().default(null),
+  orderIndex: z.number().int().min(0),
+  questionIndex: z.number().int().min(0).nullable().optional().default(null),
+});
+
+const importPackSchema = z.object({
+  formatVersion: z.literal(1),
+  pack: z.object({
+    slug: z.string().min(1).max(200).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+    title: z.string().min(1).max(500),
+    description: z.string().max(2000).default(''),
+    category: z.enum(['culture', 'stem']),
+    subject: z.string().max(200).nullable().optional().default(null),
+    tags: z.array(z.string().max(100)).max(20).default([]),
+    difficulty: z.string().max(50).nullable().optional().default('mixed'),
+    gradeLevel: z.string().max(50).nullable().optional().default(null),
+    curriculum: z.string().max(200).nullable().optional().default(null),
+    author: z.string().max(200).nullable().optional().default(null),
+    source: z.string().max(500).nullable().optional().default(null),
+    sourceUrl: z.string().max(2000).nullable().optional().default(null),
+    license: z.string().max(200).default('CC-BY-4.0'),
+    coverImage: z.string().max(2000).nullable().optional().default(null),
+    packType: z.enum(['standard', 'narrative', 'exam']).default('standard'),
+    estimatedDurationMin: z.number().int().min(0).nullable().optional().default(null),
+    objectives: z.array(z.object({
+      text: z.string().min(1).max(1000),
+      orderIndex: z.number().int().min(0),
+    })).max(50).default([]),
+    chapters: z.array(z.object({
+      title: z.string().min(1).max(500),
+      description: z.string().max(2000).nullable().optional().default(null),
+      contentText: z.string().max(50000).nullable().optional().default(null),
+      imageUrl: z.string().max(2000).nullable().optional().default(null),
+      orderIndex: z.number().int().min(0),
+      chapterType: z.enum(['intro', 'content', 'summary', 'exam']).default('content'),
+    })).max(100).default([]),
+    questions: z.array(importQuestionSchema).max(500).default([]),
+    scenes: z.array(importSceneSchema).max(200).default([]),
+  }),
+});
+
+function generateUniqueSlug(baseSlug: string): string {
+  const db = getDb();
+  const exists = (s: string) =>
+    db.prepare('SELECT 1 FROM content_packs WHERE slug = ?').get(s) != null;
+
+  if (!exists(baseSlug)) return baseSlug;
+
+  let suffix = 2;
+  while (exists(`${baseSlug}-${suffix}`)) suffix++;
+  return `${baseSlug}-${suffix}`;
+}
+
+export function importPack(data: unknown) {
+  const parsed = importPackSchema.parse(data);
+  const p = parsed.pack;
+  const db = getDb();
+
+  const packId = randomUUID();
+  const slug = generateUniqueSlug(p.slug);
+
+  const chapterIds: string[] = [];
+  const questionIds: string[] = [];
+
+  const doImport = db.transaction(() => {
+    db.prepare(`INSERT INTO content_packs (
+      id, slug, title, description, category, subject, tags, difficulty,
+      grade_level, curriculum, author, source, source_url, license, version,
+      cover_image, status, pack_type, estimated_duration_min, total_questions, times_used
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 'active', ?, ?, ?, 0)`).run(
+      packId, slug, p.title, p.description, p.category,
+      p.subject, JSON.stringify(p.tags), p.difficulty,
+      p.gradeLevel, p.curriculum, p.author, p.source, p.sourceUrl,
+      p.license, p.coverImage, p.packType,
+      p.estimatedDurationMin, p.questions.length,
+    );
+
+    for (const obj of p.objectives) {
+      db.prepare(
+        'INSERT INTO pack_objectives (id, pack_id, text, order_index) VALUES (?, ?, ?, ?)'
+      ).run(randomUUID(), packId, obj.text, obj.orderIndex);
+    }
+
+    for (const ch of p.chapters) {
+      const chId = randomUUID();
+      chapterIds.push(chId);
+      db.prepare(
+        'INSERT INTO pack_chapters (id, pack_id, title, description, content_text, image_url, order_index, chapter_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+      ).run(chId, packId, ch.title, ch.description, ch.contentText, ch.imageUrl, ch.orderIndex, ch.chapterType);
+    }
+
+    for (const q of p.questions) {
+      const qId = randomUUID();
+      questionIds.push(qId);
+      const chapterId = q.chapterIndex != null && q.chapterIndex < chapterIds.length
+        ? chapterIds[q.chapterIndex] : null;
+
+      db.prepare(
+        'INSERT INTO pack_questions (id, pack_id, chapter_id, type, text, image_url, time_limit, points, explanation, topic, difficulty, order_index, math_notation) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      ).run(qId, packId, chapterId, q.type, q.text, q.imageUrl, q.timeLimit, q.points, q.explanation, q.topic, q.difficulty, q.orderIndex, q.mathNotation ? 1 : 0);
+
+      for (const a of q.answers) {
+        db.prepare(
+          'INSERT INTO pack_answer_options (id, question_id, text, is_correct, order_index) VALUES (?, ?, ?, ?, ?)'
+        ).run(randomUUID(), qId, a.text, a.isCorrect ? 1 : 0, a.orderIndex);
+      }
+    }
+
+    for (const s of p.scenes) {
+      const questionId = s.questionIndex != null && s.questionIndex < questionIds.length
+        ? questionIds[s.questionIndex] : null;
+
+      db.prepare(
+        'INSERT INTO pack_scenes (id, pack_id, title, narrator_text, background_image, narrator_mood, audio_file, duration_seconds, order_index, question_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      ).run(randomUUID(), packId, s.title, s.narratorText, s.backgroundImage, s.narratorMood, s.audioFile, s.durationSeconds, s.orderIndex, questionId);
+    }
+  });
+
+  doImport();
+
+  return getPackById(packId);
+}
+
+const createPackAnswerSchema = z.object({
+  text: z.string().min(1).max(1000),
+  isCorrect: z.boolean(),
+});
+
+const createPackSceneSchema = z.object({
+  title: z.string().min(1).max(500),
+  narratorText: z.string().min(1).max(5000),
+  narratorMood: z.enum(['neutral', 'happy', 'thinking', 'excited', 'serious']).default('neutral'),
+  question: z.object({
+    text: z.string().min(1).max(5000),
+    type: z.enum(['multiple-choice', 'true-false']).default('multiple-choice'),
+    timeLimit: z.number().int().min(5).max(300).default(20),
+    points: z.number().int().min(0).max(10000).default(1000),
+    explanation: z.string().max(2000).optional(),
+    answers: z.array(createPackAnswerSchema).min(2).max(6),
+  }).optional(),
+});
+
+const createPackSchema = z.object({
+  title: z.string().min(1).max(500),
+  description: z.string().max(2000).default(''),
+  category: z.enum(['culture', 'stem']),
+  subject: z.string().max(200).optional(),
+  difficulty: z.enum(['beginner', 'intermediate', 'advanced', 'mixed']).default('intermediate'),
+  gradeLevel: z.string().max(50).optional(),
+  tags: z.string().max(500).optional(),
+  objectives: z.array(z.string().min(1).max(1000)).max(20).default([]),
+  scenes: z.array(createPackSceneSchema).min(1).max(200),
+});
+
+function slugify(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 200) || 'untitled';
+}
+
+export function createPack(data: unknown) {
+  const parsed = createPackSchema.parse(data);
+  const db = getDb();
+  const packId = randomUUID();
+  const baseSlug = slugify(parsed.title);
+  const slug = generateUniqueSlug(baseSlug);
+
+  const tags = parsed.tags
+    ? parsed.tags.split(',').map(t => t.trim()).filter(Boolean)
+    : [];
+
+  let totalQuestions = 0;
+  for (const scene of parsed.scenes) {
+    if (scene.question) totalQuestions++;
+  }
+
+  const estimatedDuration = Math.max(5, parsed.scenes.length * 2 + totalQuestions * 1);
+
+  const doCreate = db.transaction(() => {
+    db.prepare(`INSERT INTO content_packs (
+      id, slug, title, description, category, subject, tags, difficulty,
+      grade_level, curriculum, author, source, license, version,
+      status, pack_type, estimated_duration_min, total_questions, times_used
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'active', 'narrative', ?, ?, 0)`).run(
+      packId, slug, parsed.title, parsed.description, parsed.category,
+      parsed.subject ?? null, JSON.stringify(tags), parsed.difficulty,
+      parsed.gradeLevel ?? null, null, 'Teacher-created', 'User content',
+      'original', estimatedDuration, totalQuestions,
+    );
+
+    for (let i = 0; i < parsed.objectives.length; i++) {
+      db.prepare(
+        'INSERT INTO pack_objectives (id, pack_id, text, order_index) VALUES (?, ?, ?, ?)'
+      ).run(randomUUID(), packId, parsed.objectives[i], i);
+    }
+
+    for (let i = 0; i < parsed.scenes.length; i++) {
+      const scene = parsed.scenes[i];
+      let questionId: string | null = null;
+
+      if (scene.question) {
+        questionId = randomUUID();
+        db.prepare(
+          'INSERT INTO pack_questions (id, pack_id, chapter_id, type, text, time_limit, points, explanation, topic, difficulty, order_index, math_notation) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)'
+        ).run(
+          questionId, packId, null, scene.question.type, scene.question.text,
+          scene.question.timeLimit, scene.question.points,
+          scene.question.explanation ?? null, null, null, i,
+        );
+
+        for (let j = 0; j < scene.question.answers.length; j++) {
+          db.prepare(
+            'INSERT INTO pack_answer_options (id, question_id, text, is_correct, order_index) VALUES (?, ?, ?, ?, ?)'
+          ).run(randomUUID(), questionId, scene.question.answers[j].text, scene.question.answers[j].isCorrect ? 1 : 0, j);
+        }
+      }
+
+      db.prepare(
+        'INSERT INTO pack_scenes (id, pack_id, title, narrator_text, narrator_mood, order_index, question_id) VALUES (?, ?, ?, ?, ?, ?, ?)'
+      ).run(randomUUID(), packId, scene.title, scene.narratorText, scene.narratorMood, i, questionId);
+    }
+  });
+
+  doCreate();
+  return getPackById(packId);
+}
+
+export function updatePack(id: string, data: unknown) {
+  const db = getDb();
+  const existing = db.prepare('SELECT * FROM content_packs WHERE id = ?').get(id) as PackRow | undefined;
+  if (!existing) return null;
+
+  const parsed = createPackSchema.parse(data);
+
+  const tags = parsed.tags
+    ? parsed.tags.split(',').map(t => t.trim()).filter(Boolean)
+    : [];
+
+  let totalQuestions = 0;
+  for (const scene of parsed.scenes) {
+    if (scene.question) totalQuestions++;
+  }
+
+  const estimatedDuration = Math.max(5, parsed.scenes.length * 2 + totalQuestions * 1);
+
+  const doUpdate = db.transaction(() => {
+    db.prepare(`UPDATE content_packs SET
+      title = ?, description = ?, category = ?, subject = ?, tags = ?, difficulty = ?,
+      grade_level = ?, estimated_duration_min = ?, total_questions = ?,
+      updated_at = datetime('now')
+      WHERE id = ?`).run(
+      parsed.title, parsed.description, parsed.category,
+      parsed.subject ?? null, JSON.stringify(tags), parsed.difficulty,
+      parsed.gradeLevel ?? null, estimatedDuration, totalQuestions, id,
+    );
+
+    db.prepare('DELETE FROM pack_objectives WHERE pack_id = ?').run(id);
+    db.prepare('DELETE FROM pack_scenes WHERE pack_id = ?').run(id);
+    db.prepare('DELETE FROM pack_answer_options WHERE question_id IN (SELECT id FROM pack_questions WHERE pack_id = ?)').run(id);
+    db.prepare('DELETE FROM pack_questions WHERE pack_id = ?').run(id);
+
+    for (let i = 0; i < parsed.objectives.length; i++) {
+      db.prepare(
+        'INSERT INTO pack_objectives (id, pack_id, text, order_index) VALUES (?, ?, ?, ?)'
+      ).run(randomUUID(), id, parsed.objectives[i], i);
+    }
+
+    for (let i = 0; i < parsed.scenes.length; i++) {
+      const scene = parsed.scenes[i];
+      let questionId: string | null = null;
+
+      if (scene.question) {
+        questionId = randomUUID();
+        db.prepare(
+          'INSERT INTO pack_questions (id, pack_id, chapter_id, type, text, time_limit, points, explanation, topic, difficulty, order_index, math_notation) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)'
+        ).run(
+          questionId, id, null, scene.question.type, scene.question.text,
+          scene.question.timeLimit, scene.question.points,
+          scene.question.explanation ?? null, null, null, i,
+        );
+
+        for (let j = 0; j < scene.question.answers.length; j++) {
+          db.prepare(
+            'INSERT INTO pack_answer_options (id, question_id, text, is_correct, order_index) VALUES (?, ?, ?, ?, ?)'
+          ).run(randomUUID(), questionId, scene.question.answers[j].text, scene.question.answers[j].isCorrect ? 1 : 0, j);
+        }
+      }
+
+      db.prepare(
+        'INSERT INTO pack_scenes (id, pack_id, title, narrator_text, narrator_mood, order_index, question_id) VALUES (?, ?, ?, ?, ?, ?, ?)'
+      ).run(randomUUID(), id, scene.title, scene.narratorText, scene.narratorMood, i, questionId);
+    }
+  });
+
+  doUpdate();
+  return getPackById(id);
 }
 
 export function searchPacks(query: string, category?: string) {

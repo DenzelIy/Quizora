@@ -8,6 +8,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "katex": "^0.19.1",
     "lucide-react": "^0.441.0",
     "qrcode.react": "^4.0.1",
     "react": "^18.3.1",

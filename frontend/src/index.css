@@ -108,3 +108,30 @@
 .narrator-talking {
   animation: narratorTalking 0.8s ease-in-out infinite;
 }
+
+[data-reduce-motion="true"] *,
+[data-reduce-motion="true"] *::before,
+[data-reduce-motion="true"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-reduce-motion="false"]) *,
+  :root:not([data-reduce-motion="false"]) *::before,
+  :root:not([data-reduce-motion="false"]) *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+[data-high-contrast="true"] {
+  --color-text: #ffffff;
+  --color-text-muted: #d1d5db;
+}
+
+[data-larger-text="true"] {
+  font-size: 18px;
+}

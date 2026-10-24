@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useSettings } from '../contexts/SettingsContext';
 
 export type NarratorMood = 'neutral' | 'happy' | 'thinking' | 'excited' | 'serious';
 
@@ -21,16 +22,19 @@ const SIZE_MAP = { sm: 80, md: 120, lg: 160 };
 
 export function Narrator({ mood, isTalking = false, size = 'md', className = '' }: NarratorProps) {
   const [blinkOpen, setBlinkOpen] = useState(true);
+  const { settings } = useSettings();
   const colors = MOOD_COLORS[mood];
   const s = SIZE_MAP[size];
+  const animated = !settings.reduceMotion;
 
   useEffect(() => {
+    if (!animated) return;
     const interval = setInterval(() => {
       setBlinkOpen(false);
       setTimeout(() => setBlinkOpen(true), 150);
     }, 3000 + Math.random() * 2000);
     return () => clearInterval(interval);
-  }, []);
+  }, [animated]);
 
   const eyeHeight = blinkOpen ? s * 0.06 : s * 0.015;
   const mouthWidth = isTalking ? s * 0.15 : s * 0.08;
@@ -44,7 +48,7 @@ export function Narrator({ mood, isTalking = false, size = 'md', className = '' 
         style={{ background: `radial-gradient(circle, ${colors.glow} 0%, transparent 70%)`, transform: 'scale(1.3)' }}
       />
 
-      <svg viewBox="0 0 100 100" className={`relative z-10 ${isTalking ? 'narrator-talking' : 'narrator-idle'}`}>
+      <svg viewBox="0 0 100 100" className={`relative z-10 ${animated ? (isTalking ? 'narrator-talking' : 'narrator-idle') : ''}`}>
         {/* Head */}
         <circle cx="50" cy="50" r="38" fill={colors.primary} opacity="0.15" stroke={colors.primary} strokeWidth="2" />
         <circle cx="50" cy="50" r="30" fill={colors.primary} opacity="0.25" />
@@ -108,7 +112,7 @@ export function Narrator({ mood, isTalking = false, size = 'md', className = '' 
 
         {/* Mouth */}
         <ellipse cx="50" cy="62" rx={mouthWidth} ry={mouthHeight} fill={colors.secondary} opacity="0.8">
-          {isTalking && (
+          {isTalking && animated && (
             <animate
               attributeName="ry"
               values={`${s * 0.02};${s * 0.08};${s * 0.04};${s * 0.07};${s * 0.02}`}

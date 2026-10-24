@@ -6,8 +6,10 @@ import cors from 'cors';
 import { initDb } from './db/index.js';
 import { seedDatabase } from './db/seed.js';
 import { seedContentPacks } from './db/seedPacks.js';
+import { seedExtraContentPacks } from './db/seedPacksExtra.js';
 import quizRoutes from './routes/quizRoutes.js';
 import packRoutes from './routes/packRoutes.js';
+import analyticsRoutes from './routes/analyticsRoutes.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { setupSocketIO } from './socket/index.js';
 import { getLanAddresses } from './utils/network.js';
@@ -20,6 +22,7 @@ const DB_PATH = process.env.DB_PATH ?? path.join(__dirname, '..', 'data', 'quizs
 initDb(DB_PATH);
 seedDatabase();
 seedContentPacks();
+seedExtraContentPacks();
 
 const app = express();
 const server = createServer(app);
@@ -33,6 +36,7 @@ app.get('/api/health', (_req, res) => {
 
 app.use('/api', quizRoutes);
 app.use('/api', packRoutes);
+app.use('/api', analyticsRoutes);
 
 const frontendDist = process.env.FRONTEND_DIST ?? path.join(__dirname, '..', '..', 'frontend', 'dist');
 try {

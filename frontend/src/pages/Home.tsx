@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { Zap, Monitor, LogIn, PlusCircle, List, History, Wifi, Library } from 'lucide-react';
+import { Zap, Monitor, LogIn, PlusCircle, List, History, Wifi, Library, Settings, BookOpen } from 'lucide-react';
 import { Button } from '../components/Button';
 
 export function Home() {
@@ -43,6 +43,12 @@ export function Home() {
           </Link>
           <Link to="/host/history" className="flex items-center gap-1.5 text-sm text-slate-400 hover:text-violet-300 transition-colors">
             <History className="w-4 h-4" /> Game History
+          </Link>
+          <Link to="/story/new" className="flex items-center gap-1.5 text-sm text-slate-400 hover:text-amber-300 transition-colors">
+            <BookOpen className="w-4 h-4" /> Create Story
+          </Link>
+          <Link to="/settings" className="flex items-center gap-1.5 text-sm text-slate-400 hover:text-slate-200 transition-colors">
+            <Settings className="w-4 h-4" /> Settings
           </Link>
         </div>
 

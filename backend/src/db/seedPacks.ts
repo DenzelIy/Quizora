@@ -232,48 +232,48 @@ export function seedContentPacks() {
     insertObjective.run(randomUUID(), sp1, 'Perform basic operations with fractions', 1);
     insertObjective.run(randomUUID(), sp1, 'Solve word problems involving fractions and decimals', 2);
 
-    addQ(sp1, null, 'multiple-choice', 'What is 3/4 expressed as a decimal?', 20, 1000,
-      'To convert 3/4 to a decimal, divide 3 by 4: 3 ÷ 4 = 0.75', 'Fraction to decimal', 'easy', 0, 1, [
-        { text: '0.25', correct: false },
-        { text: '0.34', correct: false },
-        { text: '0.75', correct: true },
-        { text: '1.33', correct: false },
+    addQ(sp1, null, 'multiple-choice', 'What is $\\frac{3}{4}$ expressed as a decimal?', 20, 1000,
+      'To convert $\\frac{3}{4}$ to a decimal, divide 3 by 4: $3 \\div 4 = 0.75$', 'Fraction to decimal', 'easy', 0, 1, [
+        { text: '$0.25$', correct: false },
+        { text: '$0.34$', correct: false },
+        { text: '$0.75$', correct: true },
+        { text: '$1.33$', correct: false },
       ]);
 
-    addQ(sp1, null, 'multiple-choice', 'What is 1/2 + 1/4?', 25, 1000,
-      'To add 1/2 + 1/4, convert to a common denominator: 2/4 + 1/4 = 3/4', 'Adding fractions', 'easy', 1, 1, [
-        { text: '2/6', correct: false },
-        { text: '1/3', correct: false },
-        { text: '3/4', correct: true },
-        { text: '2/4', correct: false },
+    addQ(sp1, null, 'multiple-choice', 'What is $\\frac{1}{2} + \\frac{1}{4}$?', 25, 1000,
+      'To add $\\frac{1}{2} + \\frac{1}{4}$, convert to a common denominator: $\\frac{2}{4} + \\frac{1}{4} = \\frac{3}{4}$', 'Adding fractions', 'easy', 1, 1, [
+        { text: '$\\frac{2}{6}$', correct: false },
+        { text: '$\\frac{1}{3}$', correct: false },
+        { text: '$\\frac{3}{4}$', correct: true },
+        { text: '$\\frac{2}{4}$', correct: false },
       ]);
 
-    addQ(sp1, null, 'multiple-choice', 'What is 40% expressed as a fraction in its simplest form?', 20, 1000,
-      '40% = 40/100 = 2/5 (dividing both numerator and denominator by 20)', 'Percentage to fraction', 'medium', 2, 1, [
-        { text: '4/10', correct: false },
-        { text: '2/5', correct: true },
-        { text: '1/4', correct: false },
-        { text: '40/10', correct: false },
+    addQ(sp1, null, 'multiple-choice', 'What is $40\\%$ expressed as a fraction in its simplest form?', 20, 1000,
+      '$40\\% = \\frac{40}{100} = \\frac{2}{5}$ (dividing both numerator and denominator by 20)', 'Percentage to fraction', 'medium', 2, 1, [
+        { text: '$\\frac{4}{10}$', correct: false },
+        { text: '$\\frac{2}{5}$', correct: true },
+        { text: '$\\frac{1}{4}$', correct: false },
+        { text: '$\\frac{40}{10}$', correct: false },
       ]);
 
     addQ(sp1, null, 'multiple-choice', 'If a student scores 18 out of 24 on a test, what percentage did they score?', 30, 1200,
-      '18/24 = 3/4 = 0.75 = 75%', 'Word problems', 'medium', 3, 1, [
-        { text: '60%', correct: false },
-        { text: '72%', correct: false },
-        { text: '75%', correct: true },
-        { text: '80%', correct: false },
+      '$\\frac{18}{24} = \\frac{3}{4} = 0.75 = 75\\%$', 'Word problems', 'medium', 3, 1, [
+        { text: '$60\\%$', correct: false },
+        { text: '$72\\%$', correct: false },
+        { text: '$75\\%$', correct: true },
+        { text: '$80\\%$', correct: false },
       ]);
 
-    addQ(sp1, null, 'multiple-choice', 'What is 2/3 × 3/5?', 25, 1000,
-      'Multiply numerators: 2 × 3 = 6. Multiply denominators: 3 × 5 = 15. Then simplify: 6/15 = 2/5', 'Multiplying fractions', 'medium', 4, 1, [
-        { text: '6/8', correct: false },
-        { text: '5/8', correct: false },
-        { text: '2/5', correct: true },
-        { text: '6/15', correct: false },
+    addQ(sp1, null, 'multiple-choice', 'What is $\\frac{2}{3} \\times \\frac{3}{5}$?', 25, 1000,
+      'Multiply numerators: $2 \\times 3 = 6$. Multiply denominators: $3 \\times 5 = 15$. Then simplify: $\\frac{6}{15} = \\frac{2}{5}$', 'Multiplying fractions', 'medium', 4, 1, [
+        { text: '$\\frac{6}{8}$', correct: false },
+        { text: '$\\frac{5}{8}$', correct: false },
+        { text: '$\\frac{2}{5}$', correct: true },
+        { text: '$\\frac{6}{15}$', correct: false },
       ]);
 
-    addQ(sp1, null, 'true-false', '0.5 is greater than 3/4.', 15, 800,
-      '0.5 = 1/2, and 1/2 (0.5) is less than 3/4 (0.75).', 'Comparing values', 'easy', 5, 1, [
+    addQ(sp1, null, 'true-false', '$0.5$ is greater than $\\frac{3}{4}$.', 15, 800,
+      '$0.5 = \\frac{1}{2}$, and $\\frac{1}{2}$ (0.5) is less than $\\frac{3}{4}$ (0.75).', 'Comparing values', 'easy', 5, 1, [
         { text: 'True', correct: false },
         { text: 'False', correct: true },
       ]);

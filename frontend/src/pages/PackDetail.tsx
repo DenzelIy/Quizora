@@ -3,11 +3,12 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   ArrowLeft, BookOpen, Beaker, Target, CheckCircle2, HelpCircle,
   Clock, Import, ChevronDown, ChevronRight, FileText, MessageSquare,
-  Star, AlertCircle, Loader2, Play,
+  Star, AlertCircle, Loader2, Play, Download,
 } from 'lucide-react';
 import { api, type PackFull, type QuizSummary } from '../services/api';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
+import { MathText } from '../components/MathText';
 
 const DIFFICULTY_COLORS: Record<string, string> = {
   beginner: 'bg-emerald-500/20 text-emerald-300',
@@ -43,6 +44,7 @@ export function PackDetail() {
 
   const [expandedChapters, setExpandedChapters] = useState<Set<string>>(new Set());
   const [expandedScenes, setExpandedScenes] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     if (!slug) return;
@@ -86,6 +88,24 @@ export function PackDetail() {
       setError(e.message);
     } finally {
       setImporting(false);
+    }
+  };
+
+  const handleExport = async () => {
+    if (!pack) return;
+    setExporting(true);
+    try {
+      const blob = await api.exportPack(pack.id);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${pack.slug}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -160,15 +180,23 @@ export function PackDetail() {
                 <span key={tag} className="text-xs px-2 py-0.5 rounded-full bg-slate-700/50 text-slate-300">{tag}</span>
               ))}
             </div>
-            {pack.scenes.length > 0 && (
-              <div className="mt-4">
+            <div className="mt-4 flex flex-wrap gap-3">
+              {pack.scenes.length > 0 && (
                 <Link to={`/griot/${pack.slug}`}>
                   <Button variant="primary" size="lg" icon={<Play className="w-5 h-5" />}>
                     Play Griot Mode
                   </Button>
                 </Link>
-              </div>
-            )}
+              )}
+              {pack.questions.length > 0 && (
+                <Link to={`/exam/${pack.slug}`}>
+                  <button className="inline-flex items-center justify-center gap-2.5 font-semibold px-6 py-3 text-base rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white shadow-lg shadow-cyan-500/20 transition-all">
+                    <Clock className="w-5 h-5" />
+                    Take Timed Exam
+                  </button>
+                </Link>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -308,7 +336,7 @@ export function PackDetail() {
                   <div className="flex items-start justify-between gap-2">
                     <p className="text-sm text-white font-medium">
                       <span className="text-slate-500 mr-1.5">Q{i + 1}.</span>
-                      {q.text}
+                      {q.mathNotation ? <MathText text={q.text} /> : q.text}
                     </p>
                     <div className="flex items-center gap-1.5 flex-shrink-0">
                       {q.difficulty && (
@@ -332,13 +360,13 @@ export function PackDetail() {
                         }`}
                       >
                         {a.isCorrect && <CheckCircle2 className="w-3 h-3 inline mr-1" />}
-                        {a.text}
+                        {q.mathNotation ? <MathText text={a.text} /> : a.text}
                       </div>
                     ))}
                   </div>
                   {q.explanation && (
                     <p className="text-xs text-slate-500 mt-2 italic">
-                      {q.explanation}
+                      {q.mathNotation ? <MathText text={q.explanation} /> : q.explanation}
                     </p>
                   )}
                   {q.topic && (
@@ -410,11 +438,21 @@ export function PackDetail() {
       )}
 
       {/* Pack meta footer */}
-      <div className="text-xs text-slate-600 border-t border-slate-800 pt-4 flex flex-wrap gap-4">
+      <div className="text-xs text-slate-600 border-t border-slate-800 pt-4 flex flex-wrap items-center gap-4">
         <span>License: {pack.license}</span>
         <span>Version: {pack.version}</span>
         {pack.author && <span>Author: {pack.author}</span>}
         {pack.source && <span>Source: {pack.source}</span>}
+        <Button
+          variant="ghost"
+          size="sm"
+          icon={<Download className="w-4 h-4" />}
+          loading={exporting}
+          onClick={handleExport}
+          className="ml-auto"
+        >
+          Export JSON
+        </Button>
       </div>
     </div>
   );
