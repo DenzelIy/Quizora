@@ -50,7 +50,7 @@ app.use(errorHandler);
 setupSocketIO(server);
 
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`\n  QuizSpark Server running on port ${PORT}`);
+  console.log(`\n  Quizora Server running on port ${PORT}`);
   console.log(`  Local:   http://localhost:${PORT}`);
 
   const lanAddresses = getLanAddresses();

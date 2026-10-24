@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { Zap, Monitor, LogIn, PlusCircle, List, History, Wifi } from 'lucide-react';
+import { Zap, Monitor, LogIn, PlusCircle, List, History, Wifi, Library } from 'lucide-react';
 import { Button } from '../components/Button';
 
 export function Home() {
@@ -34,6 +34,9 @@ export function Home() {
         <div className="flex flex-wrap justify-center gap-4">
           <Link to="/host/quiz/new" className="flex items-center gap-1.5 text-sm text-slate-400 hover:text-violet-300 transition-colors">
             <PlusCircle className="w-4 h-4" /> Create a Quiz
+          </Link>
+          <Link to="/packs" className="flex items-center gap-1.5 text-sm text-slate-400 hover:text-amber-300 transition-colors">
+            <Library className="w-4 h-4" /> Content Packs
           </Link>
           <Link to="/host" className="flex items-center gap-1.5 text-sm text-slate-400 hover:text-violet-300 transition-colors">
             <List className="w-4 h-4" /> My Quizzes
