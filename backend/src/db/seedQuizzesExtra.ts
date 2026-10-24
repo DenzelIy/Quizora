@@ -5,7 +5,9 @@ export function seedExtraQuizzes() {
   const db = getDb();
 
   const marker = db.prepare("SELECT COUNT(*) as count FROM quizzes WHERE category = 'Mathematics'").get() as { count: number };
-  if (marker.count > 0) return;
+  // Once seeded, the definitions below are only used to repair questions saved by the old, broken mc() helper.
+  const repairOnly = marker.count > 0;
+  let repairedCount = 0;
 
   const insertQuiz = db.prepare(
     'INSERT INTO quizzes (id, title, description, category) VALUES (?, ?, ?, ?)'
@@ -17,14 +19,41 @@ export function seedExtraQuizzes() {
     'INSERT INTO answer_options (id, question_id, text, is_correct, order_index) VALUES (?, ?, ?, ?, ?)'
   );
 
-  const addQuiz = (title: string, description: string, category: string) => {
+  const addQuiz = (title: string, description: string, category: string): string | null => {
+    if (repairOnly) {
+      const existing = db.prepare('SELECT id FROM quizzes WHERE title = ? AND category = ?').get(title, category) as { id: string } | undefined;
+      return existing?.id ?? null;
+    }
     const id = randomUUID();
     insertQuiz.run(id, title, description, category);
     return id;
   };
 
+  // The old mc() dropped the real answer and marked the first wrong answer correct. Fix questions still in
+  // exactly that state (the stored answers are the full set minus the real answer); edited questions are left alone.
+  const repairAnswers = (quizId: string, text: string, answers: { text: string; isCorrect: boolean }[]) => {
+    const question = db.prepare('SELECT id FROM questions WHERE quiz_id = ? AND text = ?').get(quizId, text) as { id: string } | undefined;
+    if (!question) return;
+
+    const correct = answers.find((a) => a.isCorrect)!.text;
+    const stored = db.prepare('SELECT id, text FROM answer_options WHERE question_id = ?').all(question.id) as { id: string; text: string }[];
+    const allTexts = new Set(answers.map((a) => a.text));
+    const isBroken =
+      stored.length === answers.length - 1 &&
+      !stored.some((a) => a.text === correct) &&
+      stored.every((a) => allTexts.has(a.text));
+    if (!isBroken) return;
+
+    db.prepare('UPDATE answer_options SET is_correct = 0 WHERE question_id = ?').run(question.id);
+    insertAnswer.run(randomUUID(), question.id, correct, 1, 0);
+    // Reorder all options to the freshly shuffled order so the real answer isn't always in the same spot.
+    const updateOrder = db.prepare('UPDATE answer_options SET order_index = ? WHERE question_id = ? AND text = ?');
+    answers.forEach((a, i) => updateOrder.run(i, question.id, a.text));
+    repairedCount++;
+  };
+
   const addQ = (
-    quizId: string,
+    quizId: string | null,
     type: string,
     text: string,
     timeLimit: number,
@@ -33,6 +62,11 @@ export function seedExtraQuizzes() {
     orderIndex: number,
     answers: { text: string; isCorrect: boolean }[]
   ) => {
+    if (repairOnly) {
+      if (quizId && type === 'multiple-choice') repairAnswers(quizId, text, answers);
+      return;
+    }
+    if (!quizId) return;
     const id = randomUUID();
     insertQuestion.run(id, quizId, type, text, timeLimit, points, explanation, orderIndex);
     answers.forEach((a, i) => {
@@ -40,10 +74,12 @@ export function seedExtraQuizzes() {
     });
   };
 
-  const mc = (t: string, c: string, ...wrong: string[]): { text: string; isCorrect: boolean }[] => [
-    ...wrong.map(w => ({ text: w, isCorrect: false })),
-    { text: c, isCorrect: true },
-  ].sort(() => Math.random() - 0.5);
+  // First argument is the correct answer, the rest are wrong.
+  const mc = (correct: string, ...wrong: string[]): { text: string; isCorrect: boolean }[] =>
+    shuffle([
+      { text: correct, isCorrect: true },
+      ...wrong.map((w) => ({ text: w, isCorrect: false })),
+    ]);
 
   const tf = (correct: boolean): { text: string; isCorrect: boolean }[] => [
     { text: 'True', isCorrect: correct },
@@ -277,5 +313,18 @@ export function seedExtraQuizzes() {
   });
 
   seedAll();
-  console.log('Seeded 22 extra quizzes with 132 total questions.');
+  if (!repairOnly) {
+    console.log('Seeded 22 extra quizzes with 132 total questions.');
+  } else if (repairedCount > 0) {
+    console.log(`Repaired correct answers on ${repairedCount} seeded questions.`);
+  }
+}
+
+function shuffle<T>(arr: T[]): T[] {
+  const result = [...arr];
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [result[i], result[j]] = [result[j], result[i]];
+  }
+  return result;
 }

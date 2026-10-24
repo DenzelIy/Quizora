@@ -7,11 +7,14 @@ import { Card } from '../components/Card';
 import { PlayerList } from '../components/PlayerList';
 import { socket, connectSocket } from '../services/socket';
 import { api, type NetworkInfo } from '../services/api';
+import { playLobbyMusic, stopMusic } from '../services/sound';
+import { MuteButton } from '../components/MuteButton';
 
 interface Player {
   id: string;
   displayName: string;
   isConnected: boolean;
+  avatar?: string;
 }
 
 interface GameSettings {
@@ -23,9 +26,13 @@ interface GameSettings {
   allowLateJoin: boolean;
   maxPlayers: number;
   minPlayers: number;
+  autoAdvance: boolean;
+  autoAdvanceSeconds: number;
 }
 
 const defaultSettings: GameSettings = {
+  autoAdvance: true,
+  autoAdvanceSeconds: 5,
   speedScoring: true,
   showLeaderboard: 'after-each',
   randomizeQuestions: false,
@@ -53,32 +60,46 @@ export function HostLobby() {
   }, []);
 
   useEffect(() => {
+    playLobbyMusic();
+    return () => stopMusic();
+  }, []);
+
+  useEffect(() => {
     if (!sessionId) return;
 
-    const ensureConnected = async () => {
-      if (!socket.connected) await connectSocket();
-
-      socket.emit('host:get-session', { sessionId }, (response: { success: boolean; pin?: string; quizTitle?: string; players?: Player[]; settings?: GameSettings }) => {
-        if (response.success) {
-          setPin(response.pin || '');
-          setQuizTitle(response.quizTitle || '');
-          setPlayers(response.players || []);
-          if (response.settings) setSettings(response.settings);
+    // Re-register as host on every (re)connect so a refresh or network blip keeps host controls working.
+    const rejoin = () => {
+      socket.emit('host:reconnect', { sessionId }, (response: { success?: boolean; state?: string; pin?: string; quizTitle?: string; players?: Player[]; settings?: GameSettings }) => {
+        if (!response.success) {
+          navigate('/host');
+          return;
         }
+        if (response.state && response.state !== 'WAITING') {
+          navigate(`/host/game/${sessionId}`);
+          return;
+        }
+        setPin(response.pin || '');
+        setQuizTitle(response.quizTitle || '');
+        setPlayers(response.players || []);
+        if (response.settings) setSettings(response.settings);
       });
     };
 
-    ensureConnected();
-
     const onPlayersUpdated = (data: { players: Player[] }) => setPlayers(data.players);
-    const onGameStarted = () => navigate(`/host/game/${sessionId}`);
+    const onGameStarting = (data: { countdown: number }) =>
+      navigate(`/host/game/${sessionId}`, { state: { countdownUntil: Date.now() + data.countdown * 1000 } });
 
+    socket.on('connect', rejoin);
     socket.on('session:players-updated', onPlayersUpdated);
-    socket.on('game:started', onGameStarted);
+    socket.on('game:starting', onGameStarting);
+
+    if (socket.connected) rejoin();
+    else connectSocket().catch(() => {});
 
     return () => {
+      socket.off('connect', rejoin);
       socket.off('session:players-updated', onPlayersUpdated);
-      socket.off('game:started', onGameStarted);
+      socket.off('game:starting', onGameStarting);
     };
   }, [sessionId, navigate]);
 
@@ -112,6 +133,9 @@ export function HostLobby() {
   return (
     <div className="max-w-4xl mx-auto px-4 py-8 space-y-6">
       <div className="text-center space-y-2">
+        <div className="flex justify-end -mb-8">
+          <MuteButton />
+        </div>
         <h1 className="text-xl font-semibold text-slate-300">{quizTitle}</h1>
         <p className="text-sm text-slate-400">Share the PIN or QR code with players</p>
       </div>
@@ -218,6 +242,31 @@ export function HostLobby() {
                 <option value="never">Never</option>
               </select>
             </div>
+            <div className="text-sm text-slate-300">
+              <label className="block mb-1">Advance to next question</label>
+              <select
+                value={settings.autoAdvance ? 'auto' : 'manual'}
+                onChange={(e) => setSettings({ ...settings, autoAdvance: e.target.value === 'auto' })}
+                className="w-full px-3 py-2 bg-[#334155] border border-slate-600 rounded-lg text-slate-100 outline-none text-sm"
+              >
+                <option value="auto">Automatic</option>
+                <option value="manual">Manual (host clicks Next)</option>
+              </select>
+            </div>
+            {settings.autoAdvance && (
+              <div className="text-sm text-slate-300">
+                <label className="block mb-1">Wait before moving on</label>
+                <select
+                  value={settings.autoAdvanceSeconds}
+                  onChange={(e) => setSettings({ ...settings, autoAdvanceSeconds: Number(e.target.value) })}
+                  className="w-full px-3 py-2 bg-[#334155] border border-slate-600 rounded-lg text-slate-100 outline-none text-sm"
+                >
+                  {[3, 5, 8, 10, 15, 20, 30].map((s) => (
+                    <option key={s} value={s}>{s} seconds</option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
         )}
       </Card>

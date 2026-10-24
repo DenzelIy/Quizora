@@ -33,6 +33,8 @@ interface GameSettings {
   allowLateJoin: boolean;
   maxPlayers: number;
   minPlayers: number;
+  autoAdvance: boolean;
+  autoAdvanceSeconds: number;
 }
 
 type SessionState = 'WAITING' | 'STARTING' | 'QUESTION_ACTIVE' | 'ANSWER_REVEAL' | 'LEADERBOARD' | 'FINISHED';
@@ -45,6 +47,7 @@ interface PlayerState {
   correctAnswers: number;
   totalAnswers: number;
   isConnected: boolean;
+  avatar: string;
 }
 
 interface ActiveGame {
@@ -59,13 +62,20 @@ interface ActiveGame {
   players: Map<string, PlayerState>;
   questionStartTime: number | null;
   questionTimer: ReturnType<typeof setTimeout> | null;
+  advanceTimer: ReturnType<typeof setTimeout> | null;
   answersReceived: Set<string>;
+  questionResults: Map<string, { isCorrect: boolean; points: number }>;
+  /** Rank and score at the last scoreboard, used to animate who moved up or down. */
+  lastStanding: Map<string, { rank: number; score: number }>;
   hostDisconnectTimer: ReturnType<typeof setTimeout> | null;
 }
 
 const activeGames = new Map<string, ActiveGame>();
 const pinToSession = new Map<string, string>();
 const socketToSession = new Map<string, { sessionId: string; playerId?: string; isHost: boolean }>();
+
+/** How long each question is shown on its own before answers open. */
+const QUESTION_INTRO_MS = 4000;
 
 const DEFAULT_SETTINGS: GameSettings = {
   questionTimer: true,
@@ -77,7 +87,19 @@ const DEFAULT_SETTINGS: GameSettings = {
   allowLateJoin: false,
   maxPlayers: 100,
   minPlayers: 1,
+  autoAdvance: true,
+  autoAdvanceSeconds: 5,
 };
+
+const DEFAULT_AVATAR = '🦁';
+
+/** Avatars are emoji characters chosen on the join screen; accept any short emoji-like string. */
+function sanitizeAvatar(avatar: unknown): string {
+  if (typeof avatar !== 'string') return DEFAULT_AVATAR;
+  const trimmed = avatar.trim();
+  if (!trimmed || trimmed.length > 16 || /[<>\w\s]/.test(trimmed)) return DEFAULT_AVATAR;
+  return trimmed;
+}
 
 function sanitizeName(name: unknown): string {
   if (typeof name !== 'string') return '';
@@ -97,6 +119,7 @@ function getPlayerList(game: ActiveGame) {
   return Array.from(game.players.values()).map((p) => ({
     id: p.id,
     displayName: p.displayName,
+    avatar: p.avatar,
     score: p.score,
     correctAnswers: p.correctAnswers,
     totalAnswers: p.totalAnswers,
@@ -111,65 +134,166 @@ function emitPlayersUpdate(io: Server, game: ActiveGame) {
   });
 }
 
+function getLeaderboardEntries(game: ActiveGame) {
+  return scoringService.getLeaderboard(game.sessionId).map((e) => ({
+    playerId: e.id,
+    displayName: e.display_name,
+    avatar: game.players.get(e.id)?.avatar ?? DEFAULT_AVATAR,
+    score: e.score,
+    correctAnswers: e.correct_answers,
+    totalAnswers: e.total_answers,
+    rank: e.rank,
+  }));
+}
+
+function syncPlayerScores(game: ActiveGame, leaderboard: ReturnType<typeof getLeaderboardEntries>) {
+  for (const entry of leaderboard) {
+    const player = game.players.get(entry.playerId);
+    if (player) {
+      player.score = entry.score;
+      player.correctAnswers = entry.correctAnswers;
+      player.totalAnswers = entry.totalAnswers;
+    }
+  }
+}
+
+function buildQuestions(quiz: { questions: any[] }, settings: GameSettings): Question[] {
+  let questions: Question[] = quiz.questions.map((q) => ({
+    id: q.id,
+    quizId: q.quiz_id,
+    type: q.type,
+    text: q.text,
+    imageUrl: q.image_url,
+    timeLimit: q.time_limit,
+    points: q.points,
+    explanation: q.explanation,
+    orderIndex: q.order_index,
+    answers: (q.answers ?? []).map((a: any) => ({
+      id: a.id,
+      text: a.text,
+      isCorrect: a.is_correct === 1,
+      orderIndex: a.order_index,
+    })),
+  }));
+
+  if (settings.randomizeQuestions) {
+    questions = shuffleArray(questions);
+  }
+  if (settings.randomizeAnswers) {
+    questions = questions.map((q) => ({ ...q, answers: shuffleArray(q.answers) }));
+  }
+  return questions;
+}
+
+function sanitizeSettings(input: unknown): Partial<GameSettings> {
+  if (!input || typeof input !== 'object') return {};
+  const result: Record<string, unknown> = {};
+  for (const [key, defaultValue] of Object.entries(DEFAULT_SETTINGS)) {
+    const value = (input as Record<string, unknown>)[key];
+    if (typeof value === typeof defaultValue) result[key] = value;
+  }
+  if (typeof result.autoAdvanceSeconds === 'number') {
+    result.autoAdvanceSeconds = Math.min(60, Math.max(3, Math.round(result.autoAdvanceSeconds)));
+  }
+  return result as Partial<GameSettings>;
+}
+
+function clearAdvanceTimer(game: ActiveGame) {
+  if (game.advanceTimer) {
+    clearTimeout(game.advanceTimer);
+    game.advanceTimer = null;
+  }
+}
+
+/** Starts the auto-advance countdown if enabled; returns how long until it fires (null when manual). */
+function scheduleAutoAdvance(io: Server, game: ActiveGame): number | null {
+  clearAdvanceTimer(game);
+  if (!game.settings.autoAdvance) return null;
+  const delayMs = game.settings.autoAdvanceSeconds * 1000;
+  game.advanceTimer = setTimeout(() => {
+    game.advanceTimer = null;
+    if (activeGames.get(game.sessionId) === game) advanceGame(io, game);
+  }, delayMs);
+  return delayMs;
+}
+
+/** Moves past the answer reveal or leaderboard: shows the leaderboard, the next question, or finishes. */
+function advanceGame(io: Server, game: ActiveGame) {
+  clearAdvanceTimer(game);
+
+  if (game.state === 'ANSWER_REVEAL' && game.settings.showLeaderboard === 'after-each') {
+    showLeaderboard(io, game);
+    return;
+  }
+
+  game.currentQuestionIndex++;
+
+  if (game.currentQuestionIndex >= game.questions.length) {
+    if (game.settings.showLeaderboard !== 'never') {
+      showLeaderboard(io, game);
+      clearAdvanceTimer(game);
+      setTimeout(() => finishGame(io, game), 100);
+    } else {
+      finishGame(io, game);
+    }
+    return;
+  }
+
+  sendQuestionToClients(io, game);
+}
+
+function buildQuestionPayload(game: ActiveGame) {
+  const question = game.questions[game.currentQuestionIndex];
+  if (!question) return null;
+
+  const timeLimit = game.settings.questionTimer ? question.timeLimit : 0;
+  const now = Date.now();
+  const opensAt = game.questionStartTime ?? now;
+  const elapsedMs = Math.max(0, now - opensAt);
+
+  return {
+    questionIndex: game.currentQuestionIndex,
+    totalQuestions: game.questions.length,
+    introMs: QUESTION_INTRO_MS,
+    introRemainingMs: Math.max(0, opensAt - now),
+    remainingMs: timeLimit > 0 ? Math.max(0, timeLimit * 1000 - elapsedMs) : 0,
+    question: {
+      id: question.id,
+      type: question.type,
+      text: question.text,
+      imageUrl: question.imageUrl,
+      timeLimit,
+      points: question.points,
+      answers: question.answers.map((a) => ({
+        id: a.id,
+        text: a.text,
+        orderIndex: a.orderIndex,
+      })),
+    },
+  };
+}
+
 function sendQuestionToClients(io: Server, game: ActiveGame) {
   const question = game.questions[game.currentQuestionIndex];
   if (!question) return;
 
   game.state = 'QUESTION_ACTIVE';
-  game.questionStartTime = Date.now();
+  // The question is shown on its own during the intro; answers open (and the clock starts) afterwards.
+  game.questionStartTime = Date.now() + QUESTION_INTRO_MS;
   game.answersReceived = new Set();
+  game.questionResults = new Map();
+  clearAdvanceTimer(game);
 
   const timeLimit = game.settings.questionTimer ? question.timeLimit : 0;
 
-  const hostQuestion = {
-    questionIndex: game.currentQuestionIndex,
-    totalQuestions: game.questions.length,
-    question: {
-      id: question.id,
-      type: question.type,
-      text: question.text,
-      imageUrl: question.imageUrl,
-      timeLimit,
-      points: question.points,
-      answers: question.answers.map((a) => ({
-        id: a.id,
-        text: a.text,
-        orderIndex: a.orderIndex,
-      })),
-    },
-  };
-
-  const playerQuestion = {
-    questionIndex: game.currentQuestionIndex,
-    totalQuestions: game.questions.length,
-    question: {
-      id: question.id,
-      type: question.type,
-      text: question.text,
-      imageUrl: question.imageUrl,
-      timeLimit,
-      points: question.points,
-      answers: question.answers.map((a) => ({
-        id: a.id,
-        text: a.text,
-        orderIndex: a.orderIndex,
-      })),
-    },
-  };
-
-  io.to(`host:${game.sessionId}`).emit('game:question-started', hostQuestion);
-
-  for (const player of game.players.values()) {
-    if (player.socketId && player.isConnected) {
-      io.to(player.socketId).emit('game:question-started', playerQuestion);
-    }
-  }
+  // Hosts and players are both in the session room; answers never include isCorrect.
+  io.to(game.sessionId).emit('game:question-started', buildQuestionPayload(game));
 
   if (timeLimit > 0) {
     if (game.questionTimer) clearTimeout(game.questionTimer);
     game.questionTimer = setTimeout(() => {
       handleTimeUp(io, game);
-    }, timeLimit * 1000 + 500);
+    }, QUESTION_INTRO_MS + timeLimit * 1000 + 500);
   }
 }
 
@@ -192,8 +316,23 @@ function revealAnswer(io: Server, game: ActiveGame) {
 
   const correctAnswer = question.answers.find((a) => a.isCorrect);
   const stats = scoringService.getQuestionStats(game.sessionId, question.id);
+  const ranks = new Map(getLeaderboardEntries(game).map((e) => [e.playerId, e.rank]));
+
+  // Sent before the reveal so each player's result is in place when their reveal screen renders.
+  for (const player of game.players.values()) {
+    if (!player.socketId || !player.isConnected) continue;
+    const result = game.questionResults.get(player.id);
+    io.to(player.socketId).emit('game:your-result', {
+      answered: game.answersReceived.has(player.id),
+      isCorrect: result?.isCorrect ?? false,
+      pointsEarned: result?.points ?? 0,
+      score: player.score,
+      rank: ranks.get(player.id) ?? null,
+    });
+  }
 
   const revealData = {
+    autoAdvanceMs: scheduleAutoAdvance(io, game),
     questionId: question.id,
     correctAnswerId: correctAnswer?.id ?? null,
     explanation: game.settings.showExplanations ? question.explanation : null,
@@ -206,32 +345,21 @@ function revealAnswer(io: Server, game: ActiveGame) {
   };
 
   io.to(game.sessionId).emit('game:answer-reveal', revealData);
-
-  for (const player of game.players.values()) {
-    if (!player.socketId || !player.isConnected) continue;
-    const answered = game.answersReceived.has(player.id);
-    io.to(player.socketId).emit('game:your-result', {
-      playerId: player.id,
-      answered,
-      score: player.score,
-    });
-  }
 }
 
 function showLeaderboard(io: Server, game: ActiveGame) {
   game.state = 'LEADERBOARD';
-  const leaderboard = scoringService.getLeaderboard(game.sessionId);
-
-  for (const entry of leaderboard) {
-    const player = game.players.get(entry.id);
-    if (player) {
-      player.score = entry.score;
-      player.correctAnswers = entry.correct_answers;
-      player.totalAnswers = entry.total_answers;
-    }
-  }
+  // Previous rank and score let the scoreboard start from the old order and animate overtakes.
+  const leaderboard = getLeaderboardEntries(game).map((e) => ({
+    ...e,
+    previousRank: game.lastStanding.get(e.playerId)?.rank,
+    previousScore: game.lastStanding.get(e.playerId)?.score ?? 0,
+  }));
+  syncPlayerScores(game, leaderboard);
+  game.lastStanding = new Map(leaderboard.map((e) => [e.playerId, { rank: e.rank, score: e.score }]));
 
   io.to(game.sessionId).emit('game:leaderboard-updated', {
+    autoAdvanceMs: scheduleAutoAdvance(io, game),
     leaderboard,
     questionIndex: game.currentQuestionIndex,
     totalQuestions: game.questions.length,
@@ -241,21 +369,14 @@ function showLeaderboard(io: Server, game: ActiveGame) {
 
 function finishGame(io: Server, game: ActiveGame) {
   game.state = 'FINISHED';
+  clearAdvanceTimer(game);
   if (game.questionTimer) {
     clearTimeout(game.questionTimer);
     game.questionTimer = null;
   }
 
-  const leaderboard = scoringService.getLeaderboard(game.sessionId);
-
-  for (const entry of leaderboard) {
-    const player = game.players.get(entry.id);
-    if (player) {
-      player.score = entry.score;
-      player.correctAnswers = entry.correct_answers;
-      player.totalAnswers = entry.total_answers;
-    }
-  }
+  const leaderboard = getLeaderboardEntries(game);
+  syncPlayerScores(game, leaderboard);
 
   sessionService.finishSession(game.sessionId);
 
@@ -290,20 +411,9 @@ export function setupGameHandlers(io: Server) {
         const quiz = quizService.getQuizById(quizId);
         if (!quiz) return callback?.({ error: 'Quiz not found' });
 
-        const mergedSettings: GameSettings = { ...DEFAULT_SETTINGS, ...settings };
+        const mergedSettings: GameSettings = { ...DEFAULT_SETTINGS, ...sanitizeSettings(settings) };
         const session = sessionService.createSession(quizId, socket.id, mergedSettings as unknown as Record<string, unknown>);
-
-        let questions: Question[] = quiz.questions.map((q: any) => ({
-          ...q,
-          answers: q.answers ?? [],
-        }));
-
-        if (mergedSettings.randomizeQuestions) {
-          questions = shuffleArray(questions);
-        }
-        if (mergedSettings.randomizeAnswers) {
-          questions = questions.map((q) => ({ ...q, answers: shuffleArray(q.answers) }));
-        }
+        const questions = buildQuestions(quiz, mergedSettings);
 
         const game: ActiveGame = {
           sessionId: session.id,
@@ -317,7 +427,10 @@ export function setupGameHandlers(io: Server) {
           players: new Map(),
           questionStartTime: null,
           questionTimer: null,
+          advanceTimer: null,
           answersReceived: new Set(),
+          questionResults: new Map(),
+          lastStanding: new Map(),
           hostDisconnectTimer: null,
         };
 
@@ -329,6 +442,7 @@ export function setupGameHandlers(io: Server) {
         socket.join(`host:${session.id}`);
 
         callback?.({
+          success: true,
           sessionId: session.id,
           pin: session.pin,
           quizTitle: quiz.title,
@@ -342,7 +456,7 @@ export function setupGameHandlers(io: Server) {
 
     socket.on('player:join-session', (data, callback) => {
       try {
-        const { pin, displayName: rawName } = data ?? {};
+        const { pin, displayName: rawName, avatar } = data ?? {};
         const displayName = sanitizeName(rawName);
 
         if (!pin || typeof pin !== 'string' || !/^\d{6}$/.test(pin)) {
@@ -366,7 +480,8 @@ export function setupGameHandlers(io: Server) {
           return callback?.({ error: 'Game is full' });
         }
 
-        const player = sessionService.addPlayer(sessionId, displayName, socket.id);
+        const playerAvatar = sanitizeAvatar(avatar);
+        const player = sessionService.addPlayer(sessionId, displayName, socket.id, playerAvatar);
 
         game.players.set(player.id, {
           id: player.id,
@@ -376,6 +491,7 @@ export function setupGameHandlers(io: Server) {
           correctAnswers: 0,
           totalAnswers: 0,
           isConnected: true,
+          avatar: playerAvatar,
         });
 
         socketToSession.set(socket.id, { sessionId, playerId: player.id, isHost: false });
@@ -384,16 +500,30 @@ export function setupGameHandlers(io: Server) {
         emitPlayersUpdate(io, game);
 
         callback?.({
+          success: true,
           playerId: player.id,
           sessionId,
           displayName: player.displayName,
-          quizTitle: game.questions.length > 0 ? undefined : undefined,
           gameState: game.state,
         });
       } catch (err) {
         console.error('Error joining session:', err);
         callback?.({ error: 'Failed to join game' });
       }
+    });
+
+    socket.on('player:update-avatar', (data, callback) => {
+      const info = socketToSession.get(socket.id);
+      if (!info || info.isHost || !info.playerId) return callback?.({ error: 'Unauthorized' });
+
+      const game = activeGames.get(info.sessionId);
+      const player = game?.players.get(info.playerId);
+      if (!game || !player) return callback?.({ error: 'Game not found' });
+
+      player.avatar = sanitizeAvatar(data?.avatar);
+      sessionService.updatePlayerAvatar(player.id, player.avatar);
+      emitPlayersUpdate(io, game);
+      callback?.({ success: true, avatar: player.avatar });
     });
 
     socket.on('player:leave-session', () => {
@@ -441,13 +571,21 @@ export function setupGameHandlers(io: Server) {
       callback?.({ success: true });
     });
 
-    socket.on('host:start-game', (_, callback) => {
+    socket.on('host:start-game', (data, callback) => {
       const info = socketToSession.get(socket.id);
       if (!info || !info.isHost) return callback?.({ error: 'Unauthorized' });
 
       const game = activeGames.get(info.sessionId);
       if (!game) return callback?.({ error: 'Game not found' });
       if (game.state !== 'WAITING') return callback?.({ error: 'Game already started' });
+
+      // Apply settings changed in the lobby, rebuilding questions so randomization takes effect.
+      if (data?.settings) {
+        const quiz = quizService.getQuizById(game.quizId);
+        if (!quiz) return callback?.({ error: 'Quiz not found' });
+        game.settings = { ...game.settings, ...sanitizeSettings(data.settings) };
+        game.questions = buildQuestions(quiz, game.settings);
+      }
 
       const connectedCount = Array.from(game.players.values()).filter((p) => p.isConnected).length;
       if (connectedCount < game.settings.minPlayers) {
@@ -462,6 +600,8 @@ export function setupGameHandlers(io: Server) {
       io.to(game.sessionId).emit('game:starting', { countdown: 3 });
 
       setTimeout(() => {
+        // The host may have ended the game during the countdown.
+        if (activeGames.get(game.sessionId) !== game || game.state !== 'STARTING') return;
         game.currentQuestionIndex = 0;
         sendQuestionToClients(io, game);
       }, 3000);
@@ -480,24 +620,7 @@ export function setupGameHandlers(io: Server) {
         return callback?.({ error: 'Cannot advance right now' });
       }
 
-      if (game.state === 'ANSWER_REVEAL' && game.settings.showLeaderboard === 'after-each') {
-        showLeaderboard(io, game);
-        return callback?.({ success: true });
-      }
-
-      game.currentQuestionIndex++;
-
-      if (game.currentQuestionIndex >= game.questions.length) {
-        if (game.settings.showLeaderboard !== 'never') {
-          showLeaderboard(io, game);
-          setTimeout(() => finishGame(io, game), 100);
-        } else {
-          finishGame(io, game);
-        }
-        return callback?.({ success: true });
-      }
-
-      sendQuestionToClients(io, game);
+      advanceGame(io, game);
       callback?.({ success: true });
     });
 
@@ -532,13 +655,12 @@ export function setupGameHandlers(io: Server) {
       if (!game.questionStartTime) return callback?.({ error: 'Timer error' });
 
       const responseTimeMs = Date.now() - game.questionStartTime;
+      if (responseTimeMs < 0) return callback?.({ error: 'Answers are not open yet' });
       const timeLimitMs = question.timeLimit * 1000;
 
       if (game.settings.questionTimer && responseTimeMs > timeLimitMs + 1000) {
         return callback?.({ error: 'Time is up' });
       }
-
-      const isCorrect = validAnswer.isCorrect;
 
       const result = scoringService.recordAnswer(
         game.sessionId,
@@ -562,6 +684,7 @@ export function setupGameHandlers(io: Server) {
       }
 
       game.answersReceived.add(info.playerId);
+      game.questionResults.set(info.playerId, { isCorrect: result.isCorrect, points: result.points });
 
       callback?.({ received: true });
 
@@ -588,6 +711,21 @@ export function setupGameHandlers(io: Server) {
       }
 
       revealAnswer(io, game);
+      callback?.({ success: true });
+    });
+
+    socket.on('host:show-leaderboard', (_, callback) => {
+      const info = socketToSession.get(socket.id);
+      if (!info || !info.isHost) return callback?.({ error: 'Unauthorized' });
+
+      const game = activeGames.get(info.sessionId);
+      if (!game) return callback?.({ error: 'Game not found' });
+
+      if (game.state !== 'ANSWER_REVEAL') {
+        return callback?.({ error: 'Leaderboard is available after the answer is revealed' });
+      }
+
+      showLeaderboard(io, game);
       callback?.({ success: true });
     });
 
@@ -627,11 +765,20 @@ export function setupGameHandlers(io: Server) {
       callback?.({
         success: true,
         displayName: player.displayName,
+        avatar: player.avatar,
         score: player.score,
         gameState: game.state,
         currentQuestionIndex: game.currentQuestionIndex,
         totalQuestions: game.questions.length,
       });
+
+      // Bring a refreshed or late-joining player into the question in progress.
+      if (game.state === 'QUESTION_ACTIVE') {
+        socket.emit('game:question-started', {
+          ...buildQuestionPayload(game),
+          alreadyAnswered: game.answersReceived.has(playerId),
+        });
+      }
     });
 
     socket.on('disconnect', () => {
@@ -690,6 +837,8 @@ export function setupGameHandlers(io: Server) {
 
       io.to(sessionId).emit('game:host-reconnected');
 
+      const quiz = quizService.getQuizById(game.quizId);
+
       callback?.({
         success: true,
         state: game.state,
@@ -697,7 +846,14 @@ export function setupGameHandlers(io: Server) {
         totalQuestions: game.questions.length,
         players: getPlayerList(game),
         pin: game.pin,
+        quizTitle: quiz?.title ?? '',
+        settings: game.settings,
+        answerCount: game.answersReceived.size,
       });
+
+      if (game.state === 'QUESTION_ACTIVE') {
+        socket.emit('game:question-started', buildQuestionPayload(game));
+      }
     });
 
     socket.on('host:get-session-info', (data, callback) => {

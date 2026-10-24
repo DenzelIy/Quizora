@@ -99,9 +99,7 @@ router.put(
 router.get(
   '/sessions',
   asyncHandler(async (_req, res) => {
-    const active = sessionService.getActiveSessions();
-    const history = sessionService.getSessionHistory();
-    res.json({ active, history });
+    res.json(sessionService.getSessionSummaries());
   }),
 );
 
@@ -128,9 +126,10 @@ router.get(
 router.get(
   '/network-info',
   asyncHandler(async (_req, res) => {
-    const port = parseInt(process.env.PORT ?? '3001', 10);
+    const backendPort = parseInt(process.env.PORT ?? '3001', 10);
+    const frontendPort = parseInt(process.env.FRONTEND_PORT ?? String(backendPort), 10);
     const interfaces = getLanAddresses();
-    res.json({ port, interfaces });
+    res.json({ port: frontendPort, interfaces });
   }),
 );
 

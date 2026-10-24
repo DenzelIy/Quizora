@@ -9,8 +9,10 @@ const colorMap: Record<string, { bg: string; hover: string; selected: string }> 
   cyan: { bg: 'bg-cyan-500/20 border-cyan-500/40', hover: 'hover:bg-cyan-500/30', selected: 'bg-cyan-500 border-cyan-400' },
 };
 
-const shapeIcons = [Circle, Square, Triangle, Diamond, Circle, Square];
+export const shapeIcons = [Circle, Square, Triangle, Diamond, Circle, Square];
 const colors = ['red', 'blue', 'green', 'yellow', 'purple', 'cyan'];
+/** Solid background per answer position, matching the colours players see on their phones. */
+export const answerSolidColors = ['bg-red-500', 'bg-blue-500', 'bg-emerald-500', 'bg-yellow-500', 'bg-purple-500', 'bg-cyan-500'];
 
 interface AnswerCardProps {
   text: string;

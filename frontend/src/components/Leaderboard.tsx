@@ -3,6 +3,7 @@ import { Trophy, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 interface LeaderboardEntry {
   playerId: string;
   displayName: string;
+  avatar?: string;
   score: number;
   correctAnswers: number;
   rank: number;
@@ -53,7 +54,8 @@ export function Leaderboard({ entries, highlightPlayerId, showPodium = true }: L
             if (!entry) return <div key={podiumIdx} className="flex-1" />;
             return (
               <div key={entry.playerId} className="flex-1 flex flex-col items-center podium-rise">
-                <Trophy className="w-6 h-6 mb-1" style={{ color: podiumColors[podiumIdx] }} />
+                <span className="text-5xl leading-none mb-1">{entry.avatar ?? '🙂'}</span>
+                <Trophy className="w-5 h-5 mb-1" style={{ color: podiumColors[podiumIdx] }} />
                 <p className="text-sm font-semibold text-white truncate max-w-full text-center">
                   {entry.displayName}
                 </p>
@@ -85,6 +87,7 @@ export function Leaderboard({ entries, highlightPlayerId, showPodium = true }: L
             <span className="w-8 text-center font-bold text-slate-400 text-sm">
               #{entry.rank}
             </span>
+            <span className="text-xl leading-none">{entry.avatar ?? '🙂'}</span>
             <span className="flex-1 font-medium text-white truncate">
               {entry.displayName}
             </span>
